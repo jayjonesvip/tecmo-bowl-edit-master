@@ -46,6 +46,7 @@ reference/
 - Visitors must open their own legally obtained Tecmo Super Bowl ROM.
 - The application edits an in-memory copy and exports a new timestamped `.nes` file.
 - `assets/data/data.csv` provides Madden roster imports on static hosting.
+- The bundled CSV includes Madden jersey numbers for most players, and the editor applies them to Tecmo roster records.
 - Live EA detail requests require the optional development proxy and are not used on GitHub Pages.
 - Do not add or distribute copyrighted ROM files with the site.
 
@@ -55,6 +56,12 @@ Replace `assets/data/data.csv` with a newer compatible CSV:
 
 ```powershell
 Invoke-WebRequest https://madden-ratings-data.vercel.app/data.csv -OutFile github-pages/assets/data/data.csv
+```
+
+To rebuild jersey numbers from EA detail pages in the development workspace, run:
+
+```powershell
+node work/enrich_madden_jersey_numbers.js
 ```
 
 ## References
