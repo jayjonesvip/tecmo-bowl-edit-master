@@ -1725,8 +1725,11 @@ function renderMaddenPreview() {
       <td>${escapeHtml(player.team)}</td>
       <td>${player.ovr || ""}</td>
       <td>${player.spd || ""}</td>
+      <td>${player.str || ""}</td>
+      <td>${player.agi || ""}</td>
+      <td>${player.awr || ""}</td>
     </tr>
-  `).join("") || "<tr><td colspan=\"6\">No Madden players available for this team yet.</td></tr>";
+  `).join("") || "<tr><td colspan=\"9\">No Madden players available for this team yet.</td></tr>";
 }
 
 async function importMaddenRatings() {
