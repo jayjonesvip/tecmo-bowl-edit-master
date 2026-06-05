@@ -49,6 +49,11 @@ const els = {
   teamNameDiff: document.querySelector("#team-name-diff"),
   updateTeamNames: document.querySelector("#update-team-names"),
   applyTeamChanges: document.querySelector("#apply-team-changes"),
+  colorTeamSelect: document.querySelector("#color-team-select"),
+  colorStatus: document.querySelector("#color-status"),
+  colorEditor: document.querySelector("#color-editor"),
+  colorDiff: document.querySelector("#color-diff"),
+  applyColorChanges: document.querySelector("#apply-color-changes"),
   rosterHeading: document.querySelector("#roster-heading"),
   maddenHeading: document.querySelector("#madden-heading"),
   playerStatus: document.querySelector("#player-status"),
@@ -89,7 +94,19 @@ let selectedPlayerSlot = 0;
 let pendingNameEdits = new Map();
 let pendingNumberEdits = new Map();
 let pendingTeamEdits = new Map();
+let pendingColorEdits = new Map();
 let maddenPlayers = [];
+
+const NES_COLORS = [
+  "#626262", "#002A88", "#1412A7", "#3B00A4", "#5C007E", "#6E0040", "#6C0600", "#561D00",
+  "#333500", "#0B4800", "#005200", "#004F08", "#00404D", "#000000", "#000000", "#000000",
+  "#ABABAB", "#155FD9", "#4240FF", "#7527FE", "#A01ACC", "#B71E7B", "#B53120", "#994E00",
+  "#6B6D00", "#388700", "#0C9300", "#008F32", "#007C8D", "#000000", "#000000", "#000000",
+  "#FFFFFF", "#64B0FF", "#9290FF", "#C676FF", "#F36AFF", "#FE6ECC", "#FE8170", "#EA9E22",
+  "#BCBE00", "#88D800", "#5CE430", "#45E082", "#48CDDE", "#4F4F4F", "#000000", "#000000",
+  "#FFFFFF", "#C0DFFF", "#D3D2FF", "#E8C8FF", "#FAC2FF", "#FEC4EA", "#FECCC5", "#F7D8A5",
+  "#E4E594", "#CFEE96", "#BDF4AB", "#B3F3CC", "#B5EBF2", "#B8B8B8", "#000000", "#000000",
+];
 
 const DEFAULT_TEAM_NAMES_12 = [
   "IND", "MIA", "CLE", "DEN", "SEA", "RAI", "WAS", "SF", "DAL", "NYG", "CHI", "MIN",
@@ -99,6 +116,25 @@ const TSB_TEAM_NAMES_28 = [
   "BUF", "IND", "MIA", "NE", "NYJ", "CIN", "CLE", "HOU", "PIT", "DEN", "KC", "RAI", "SD", "SEA",
   "WAS", "NYG", "PHI", "PHX", "DAL", "CHI", "DET", "GB", "MIN", "TB", "SF", "RAM", "NO", "ATL",
 ];
+
+const TEAM_COLOR_BASE = 0x31140;
+const SHARED_TEAM_COLOR_OFFSETS = [
+  { label: "Team Screen Shared 1", offset: 0x31E89 },
+  { label: "Team Screen Shared 2", offset: 0x31E8A },
+  { label: "Team Screen Shared 3", offset: 0x31E8B },
+  { label: "Team Screen Shared 4", offset: 0x31E8C },
+];
+const MENU_COLOR_OFFSETS = [
+  { label: "Main Menu Background 1", offset: 0x1A850 },
+  { label: "Main Menu Background 2", offset: 0x1A854 },
+  { label: "Main Menu Background 3", offset: 0x1A858 },
+  { label: "Main Menu Background 4", offset: 0x1A859 },
+  { label: "Schedule Background", offset: 0x1A860 },
+];
+const PRO_BOWL_COLOR_OFFSETS = Array.from({ length: 16 }, (_, index) => ({
+  label: `Pro Bowl Uniform ${index + 1}`,
+  offset: 0x2C3FC + index,
+}));
 
 const TECMO_TO_MADDEN_TEAMS = {
   BUF: "Buffalo Bills", IND: "Indianapolis Colts", MIA: "Miami Dolphins", NE: "New England Patriots", NYJ: "New York Jets",
@@ -406,6 +442,7 @@ function setLoadedRom(bytes, name) {
   pendingNameEdits = new Map();
   pendingNumberEdits = new Map();
   pendingTeamEdits = new Map();
+  pendingColorEdits = new Map();
   selectedPlayerSlot = 0;
 
   fillSelects();
@@ -436,7 +473,9 @@ function enableControls(enabled) {
   els.identityTeamSelect.disabled = !enabled || !teamStringTable;
   els.updateTeamNames.disabled = !enabled || !teamStringTable;
   els.applyTeamChanges.disabled = !enabled || !pendingTeamEdits.size;
-  els.applyPlayerNames.disabled = !enabled || !pendingNameEdits.size;
+  els.colorTeamSelect.disabled = !enabled || !looksLikeTsbRom();
+  els.applyColorChanges.disabled = !enabled || !pendingColorEdits.size;
+  els.applyPlayerNames.disabled = !enabled || (!pendingNameEdits.size && !pendingNumberEdits.size);
   els.maddenTeamSelect.disabled = !maddenPlayers.length;
   els.applyMaddenTeam.disabled = !enabled || !playerTable || !maddenPlayers.length;
   els.applyMaddenAll.disabled = !enabled || playerTable?.format !== "tsb-pointer" || !maddenPlayers.length;
@@ -464,6 +503,7 @@ function fillSelects() {
   teamStringTable = detectTeamStringTable();
   fillTeamSelect();
   fillIdentityTeamSelect();
+  fillColorTeamSelect();
 }
 
 function renderAll() {
@@ -475,6 +515,7 @@ function renderAll() {
   renderHackControls();
   renderPlayers();
   renderTeams();
+  renderColors();
   updateDirty();
   els.subtitle.textContent = `${romName} loaded`;
 }
@@ -892,6 +933,110 @@ function fillIdentityTeamSelect() {
     els.identityTeamSelect.append(option);
   }
   els.identityTeamSelect.value = String(Math.min(previous, teamStringTable.teamCount - 1));
+}
+
+function fillColorTeamSelect() {
+  const previous = Number(els.colorTeamSelect.value || 0);
+  els.colorTeamSelect.innerHTML = "";
+  TSB_TEAM_NAMES_28.forEach((team, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = team;
+    els.colorTeamSelect.append(option);
+  });
+  els.colorTeamSelect.value = String(Math.min(previous, TSB_TEAM_NAMES_28.length - 1));
+}
+
+function colorByteAt(offset) {
+  if (!rom || offset < 0 || offset >= rom.length) return null;
+  return pendingColorEdits.get(offset) ?? rom[offset];
+}
+
+function paletteOption(byte) {
+  const value = Number(byte) & 0x3F;
+  return `<span class="nes-chip" style="background:${NES_COLORS[value]}"></span>${byteHex(value)}`;
+}
+
+function colorSelect(label, offset) {
+  const current = colorByteAt(offset);
+  const disabled = current === null ? " disabled" : "";
+  return `
+    <label class="color-field">
+      <span>${escapeHtml(label)}</span>
+      <select data-color-offset="${offset}"${disabled}>
+        ${NES_COLORS.map((color, value) => `
+          <option value="${value}"${current === value ? " selected" : ""}>${byteHex(value)}</option>
+        `).join("")}
+      </select>
+      <span class="nes-chip large" style="background:${current === null ? "#000" : NES_COLORS[current & 0x3F]}"></span>
+      <code>${hex(offset)}</code>
+    </label>
+  `;
+}
+
+function colorSetDiffs() {
+  return Array.from(pendingColorEdits.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([offset, value]) => ({ offset, hex: byteHex(value & 0x3F) }));
+}
+
+function renderColorDiff() {
+  const sets = colorSetDiffs();
+  if (!sets.length) {
+    els.colorDiff.textContent = "Edit a color to preview the ROM byte changes.";
+    enableControls(Boolean(rom));
+    return;
+  }
+  els.colorDiff.innerHTML = `
+    <h3>${sets.length} pending color byte${sets.length === 1 ? "" : "s"}</h3>
+    <p>NES palette values are one byte each, usually in the 00-3F range.</p>
+    ${renderSetDiff(sets)}
+  `;
+  enableControls(Boolean(rom));
+}
+
+function renderColors() {
+  if (!rom || !looksLikeTsbRom()) {
+    els.colorStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM to edit mapped color bytes.";
+    els.colorEditor.innerHTML = "";
+    els.colorDiff.textContent = "Edit a color to preview the ROM byte changes.";
+    enableControls(Boolean(rom));
+    return;
+  }
+
+  const teamIndex = Number(els.colorTeamSelect.value || 0);
+  const teamName = TSB_TEAM_NAMES_28[teamIndex] || "Team";
+  const teamOffset = TEAM_COLOR_BASE + teamIndex;
+  els.colorStatus.textContent = "These controls edit known palette bytes from the TSB set-command list. Some bytes affect menus or data screens rather than on-field uniforms.";
+  els.colorEditor.innerHTML = `
+    <section class="color-section">
+      <h3>${escapeHtml(teamName)} Team Data Screen</h3>
+      ${colorSelect(`${teamName} background`, teamOffset)}
+    </section>
+    <section class="color-section">
+      <h3>Shared Team Data Screen</h3>
+      ${SHARED_TEAM_COLOR_OFFSETS.map((item) => colorSelect(item.label, item.offset)).join("")}
+    </section>
+    <section class="color-section">
+      <h3>Menus</h3>
+      ${MENU_COLOR_OFFSETS.map((item) => colorSelect(item.label, item.offset)).join("")}
+    </section>
+    <section class="color-section">
+      <h3>Pro Bowl Uniform Bytes</h3>
+      <p class="muted">These are the mapped Pro Bowl color bytes at 0x02C3FC-0x02C40B. Labels are generic until we verify each byte in-game.</p>
+      ${PRO_BOWL_COLOR_OFFSETS.map((item) => colorSelect(item.label, item.offset)).join("")}
+    </section>
+  `;
+  renderColorDiff();
+}
+
+function applyColorEdits() {
+  const sets = colorSetDiffs();
+  if (!sets.length) return 0;
+  const written = applySets(sets);
+  pendingColorEdits.clear();
+  renderColors();
+  return written;
 }
 
 function renderTeams() {
@@ -2078,6 +2223,7 @@ function applySets(sets) {
   renderChrBank();
   renderTileEditor();
   renderPlayers();
+  renderColors();
   return written;
 }
 
@@ -2165,6 +2311,14 @@ async function exportRom() {
         applyTeamStringEdits();
       } catch (error) {
         els.teamIdentityStatus.textContent = `Could not export team changes: ${error.message}`;
+        return;
+      }
+    }
+    if (pendingColorEdits.size) {
+      try {
+        applyColorEdits();
+      } catch (error) {
+        els.colorStatus.textContent = `Could not export color changes: ${error.message}`;
         return;
       }
     }
@@ -2373,6 +2527,26 @@ els.applyTeamChanges.addEventListener("click", () => withWork("Applying Team Cha
     updateWork("Team string table rebuilt.", 1, 1);
   } catch (error) {
     els.teamIdentityStatus.textContent = `Could not apply team changes: ${error.message}`;
+  }
+}, 1));
+els.colorTeamSelect.addEventListener("change", renderColors);
+els.colorEditor.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-color-offset]");
+  if (!input) return;
+  const offset = Number(input.dataset.colorOffset);
+  const value = Number(input.value) & 0x3F;
+  if (!rom || !Number.isInteger(offset) || offset < 0 || offset >= rom.length) return;
+  if (value === rom[offset]) pendingColorEdits.delete(offset);
+  else pendingColorEdits.set(offset, value);
+  renderColors();
+});
+els.applyColorChanges.addEventListener("click", () => withWork("Applying Color Changes", "Writing mapped palette bytes...", async () => {
+  try {
+    const written = applyColorEdits();
+    els.colorStatus.textContent = `Applied ${written} color byte${written === 1 ? "" : "s"} to the working ROM.`;
+    updateWork("Color bytes written.", 1, 1);
+  } catch (error) {
+    els.colorStatus.textContent = `Could not apply color changes: ${error.message}`;
   }
 }, 1));
 els.playerTable.addEventListener("click", (event) => {

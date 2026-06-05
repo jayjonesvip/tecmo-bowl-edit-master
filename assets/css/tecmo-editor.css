@@ -591,6 +591,59 @@ input[type="range"] {
   overflow-wrap: anywhere;
 }
 
+.color-editor {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.color-section {
+  display: grid;
+  gap: 8px;
+}
+
+.color-section h3 {
+  margin: 0 0 2px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.color-field {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 84px 30px 86px;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.color-field select {
+  min-height: 30px;
+  padding: 0 8px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.color-field code {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nes-chip {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  border: 1px solid rgba(255, 255, 255, .3);
+  vertical-align: -2px;
+}
+
+.nes-chip.large {
+  width: 24px;
+  height: 24px;
+  margin-right: 0;
+}
+
 .attribute-message {
   border: 1px solid #714144;
   border-radius: 6px;
