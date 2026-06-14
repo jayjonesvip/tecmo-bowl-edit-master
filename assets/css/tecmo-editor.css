@@ -314,6 +314,83 @@ input[type="range"] {
   margin-top: 16px;
 }
 
+.seed-input {
+  width: 110px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: var(--dark);
+  color: var(--ink);
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.draft-grid {
+  grid-template-columns: minmax(520px, 1.4fr) minmax(280px, .7fr);
+}
+
+.draft-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 160px;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.draft-filters input {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: var(--dark);
+  color: var(--ink);
+}
+
+.draft-table button {
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.draft-pick-summary {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--panel-raised);
+  line-height: 1.45;
+}
+
+.draft-needs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.need-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid #5f5040;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #332b22;
+  color: #f4c48c;
+  font: 12px/1 Consolas, "Courier New", monospace;
+}
+
+.need-pill.filled {
+  border-color: #3f625c;
+  background: #203b39;
+  color: #9de1d6;
+}
+
+.draft-log {
+  max-height: 360px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font: 12px/1.4 Consolas, "Courier New", monospace;
+}
+
 .hack-controls {
   display: grid;
   gap: 10px;

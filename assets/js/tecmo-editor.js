@@ -42,6 +42,20 @@ const els = {
   applySet: document.querySelector("#apply-set"),
   setStatus: document.querySelector("#set-status"),
   teamSelect: document.querySelector("#team-select"),
+  draftUserTeam: document.querySelector("#draft-user-team"),
+  draftSeed: document.querySelector("#draft-seed"),
+  startDraft: document.querySelector("#start-draft"),
+  autoDraft: document.querySelector("#auto-draft"),
+  draftForMe: document.querySelector("#draft-for-me"),
+  applyDraft: document.querySelector("#apply-draft"),
+  resetDraft: document.querySelector("#reset-draft"),
+  draftSearch: document.querySelector("#draft-search"),
+  draftPositionFilter: document.querySelector("#draft-position-filter"),
+  draftStatus: document.querySelector("#draft-status"),
+  draftBoard: document.querySelector("#draft-board"),
+  draftPickSummary: document.querySelector("#draft-pick-summary"),
+  draftNeeds: document.querySelector("#draft-needs"),
+  draftLog: document.querySelector("#draft-log"),
   identityTeamSelect: document.querySelector("#identity-team-select"),
   teamIdentityHeading: document.querySelector("#team-identity-heading"),
   teamIdentityStatus: document.querySelector("#team-identity-status"),
@@ -96,6 +110,7 @@ let pendingNumberEdits = new Map();
 let pendingTeamEdits = new Map();
 let pendingColorEdits = new Map();
 let maddenPlayers = [];
+let draftState = null;
 
 const NES_COLORS = [
   "#626262", "#002A88", "#1412A7", "#3B00A4", "#5C007E", "#6E0040", "#6C0600", "#561D00",
@@ -251,6 +266,7 @@ const TSB_SLOT_ROLES_30 = TSB_POSITIONS_30.map((position) => {
 
 const TSB_ATTRIBUTE_VALUE_STEPS = [6, 13, 19, 25, 31, 38, 44, 50, 56, 63, 69, 75, 81, 88, 94, 100];
 const TSB_IMPORT_NAME_LIMIT = 15;
+const DRAFT_GROUP_ORDER = ["QB", "RB", "REC", "OL", "DL", "LB", "DB", "K", "P"];
 
 const ATTRIBUTE_LABELS_BY_ROLE = {
   QB: ["Running Speed", "Rushing Power", "Maximum Speed", "Hitting Power", "Passing Speed", "Pass Control", "Passing Accuracy", "Avoid Pass Block"],
@@ -444,6 +460,7 @@ function setLoadedRom(bytes, name) {
   pendingTeamEdits = new Map();
   pendingColorEdits = new Map();
   selectedPlayerSlot = 0;
+  draftState = null;
 
   fillSelects();
   renderAll();
@@ -502,6 +519,7 @@ function fillSelects() {
   playerAttributeTable = detectPlayerAttributeTable();
   teamStringTable = detectTeamStringTable();
   fillTeamSelect();
+  renderDraftTeamSelect();
   fillIdentityTeamSelect();
   fillColorTeamSelect();
 }
@@ -514,6 +532,7 @@ function renderAll() {
   renderHex();
   renderHackControls();
   renderPlayers();
+  renderDraft();
   renderTeams();
   renderColors();
   updateDirty();
@@ -1304,6 +1323,294 @@ function writePlayerAttributeValues(slotIndex, values) {
   for (let index = 0; index < count; index += 1) {
     writePlayerAttribute(slotIndex, index, values[index]);
   }
+}
+
+function draftRatingFromAttributes(attrs) {
+  if (!attrs?.values?.length) return 0;
+  const ratings = attrs.values.map((nibble) => TSB_ATTRIBUTE_VALUE_STEPS[nibble] || 0);
+  return Math.round(ratings.reduce((sum, value) => sum + value, 0) / ratings.length);
+}
+
+function seededRandom(seedText) {
+  let seed = 2166136261;
+  String(seedText || "1991").split("").forEach((char) => {
+    seed ^= char.charCodeAt(0);
+    seed = Math.imul(seed, 16777619);
+  });
+  return () => {
+    seed += 0x6D2B79F5;
+    let value = seed;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffledIndexes(count, random) {
+  const values = Array.from({ length: count }, (_, index) => index);
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+  }
+  return values;
+}
+
+function draftGroupForTeamSlot(teamSlot) {
+  return slotRoleForTeamSlot(teamSlot).groups[0] || "REC";
+}
+
+function draftGroupCounts(roster) {
+  const counts = Object.fromEntries(DRAFT_GROUP_ORDER.map((group) => [group, { open: 0, filled: 0 }]));
+  roster.forEach((player, teamSlot) => {
+    const group = draftGroupForTeamSlot(teamSlot);
+    counts[group].open += player ? 0 : 1;
+    counts[group].filled += player ? 1 : 0;
+  });
+  return counts;
+}
+
+function draftOpenSlotForPlayer(roster, player) {
+  const groups = player.groups?.length ? player.groups : [player.group];
+  for (let teamSlot = 0; teamSlot < TSB_POSITIONS_30.length; teamSlot += 1) {
+    if (!roster[teamSlot] && groups.includes(draftGroupForTeamSlot(teamSlot))) return teamSlot;
+  }
+  return -1;
+}
+
+function draftEligiblePlayersForTeam(teamIndex) {
+  if (!draftState) return [];
+  const roster = draftState.rosters[teamIndex];
+  return draftState.pool.filter((player) => !player.drafted && draftOpenSlotForPlayer(roster, player) >= 0);
+}
+
+function currentDraftTeamIndex() {
+  if (!draftState || draftState.pickIndex >= draftState.totalPicks) return -1;
+  const round = Math.floor(draftState.pickIndex / draftState.teamCount);
+  const pickInRound = draftState.pickIndex % draftState.teamCount;
+  const order = round % 2 === 0 ? draftState.order : draftState.order.slice().reverse();
+  return order[pickInRound];
+}
+
+function draftPickLabel(pickIndex = draftState?.pickIndex || 0) {
+  if (!draftState) return "";
+  const round = Math.floor(pickIndex / draftState.teamCount) + 1;
+  const pick = (pickIndex % draftState.teamCount) + 1;
+  return `Round ${round}, Pick ${pick}`;
+}
+
+function buildDraftPool() {
+  if (!playerTable || playerTable.format !== "tsb-pointer" || !playerAttributeTable?.supported) return [];
+  const players = [];
+  for (let slotIndex = 0; slotIndex < playerTable.count; slotIndex += 1) {
+    const teamIndex = Math.floor(slotIndex / playerTable.teams[0].slots);
+    const teamSlot = slotIndex % playerTable.teams[0].slots;
+    const role = slotRoleForTeamSlot(teamSlot);
+    const attrs = readPlayerAttributes(slotIndex);
+    const name = readPlayerName(slotIndex);
+    players.push({
+      id: slotIndex,
+      sourceSlot: slotIndex,
+      sourceTeam: playerTable.teams[teamIndex]?.name || `Team ${teamIndex + 1}`,
+      sourceTeamIndex: teamIndex,
+      sourceTeamSlot: teamSlot,
+      sourceRole: role.label,
+      group: role.groups[0],
+      groups: role.groups,
+      name,
+      number: readPlayerNumber(slotIndex),
+      attributes: attrs?.values?.slice() || [],
+      rating: draftRatingFromAttributes(attrs),
+      drafted: false,
+    });
+  }
+  return players;
+}
+
+function startSmartDraft() {
+  if (!playerTable || playerTable.format !== "tsb-pointer" || !playerAttributeTable?.supported) {
+    els.draftStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM first. Smart Shuffle uses native TSB names, jerseys, and attributes.";
+    return;
+  }
+  const teamCount = playerTable.teams.length;
+  const slotsPerTeam = playerTable.teams[0].slots;
+  const random = seededRandom(els.draftSeed.value || "1991");
+  draftState = {
+    active: true,
+    complete: false,
+    userTeamIndex: Number(els.draftUserTeam.value || 0),
+    random,
+    order: shuffledIndexes(teamCount, random),
+    pickIndex: 0,
+    teamCount,
+    slotsPerTeam,
+    totalPicks: teamCount * slotsPerTeam,
+    pool: buildDraftPool().sort((a, b) => b.rating - a.rating),
+    rosters: Array.from({ length: teamCount }, () => Array(slotsPerTeam).fill(null)),
+    log: [],
+  };
+  renderDraft();
+}
+
+function draftScorePlayer(teamIndex, player) {
+  const roster = draftState.rosters[teamIndex];
+  const counts = draftGroupCounts(roster);
+  const openInGroup = counts[player.group]?.open || 0;
+  const filledInGroup = counts[player.group]?.filled || 0;
+  const scarcity = draftState.pool.filter((candidate) => !candidate.drafted && candidate.group === player.group).length;
+  const needBonus = openInGroup * 8 - filledInGroup * 1.5;
+  const scarcityBonus = scarcity ? Math.max(0, 18 - scarcity / 2) : 0;
+  return player.rating + needBonus + scarcityBonus + draftState.random() * 6;
+}
+
+function draftSelectAiPlayer(teamIndex) {
+  const eligible = draftEligiblePlayersForTeam(teamIndex);
+  if (!eligible.length) return null;
+  return eligible
+    .map((player) => ({ player, score: draftScorePlayer(teamIndex, player) }))
+    .sort((a, b) => b.score - a.score)[0].player;
+}
+
+function draftPlayerForTeam(teamIndex, player, forced = false) {
+  if (!draftState || !player || player.drafted) return false;
+  const roster = draftState.rosters[teamIndex];
+  const teamSlot = draftOpenSlotForPlayer(roster, player);
+  if (teamSlot < 0) return false;
+  roster[teamSlot] = player;
+  player.drafted = true;
+  const teamName = playerTable.teams[teamIndex]?.name || `Team ${teamIndex + 1}`;
+  draftState.log.unshift(`${draftPickLabel()}: ${teamName} selected ${player.name} (${player.sourceRole}, ${player.rating})${forced ? " [auto]" : ""}`);
+  draftState.pickIndex += 1;
+  if (draftState.pickIndex >= draftState.totalPicks) draftState.complete = true;
+  return true;
+}
+
+function autoDraftOnePick(forUser = false) {
+  if (!draftState || draftState.complete) return false;
+  const teamIndex = currentDraftTeamIndex();
+  if (teamIndex < 0) return false;
+  const player = draftSelectAiPlayer(teamIndex);
+  if (!player) {
+    draftState.pickIndex += 1;
+    return false;
+  }
+  return draftPlayerForTeam(teamIndex, player, forUser);
+}
+
+function autoDraftToUserPick() {
+  if (!draftState) return;
+  while (!draftState.complete && currentDraftTeamIndex() !== draftState.userTeamIndex) {
+    autoDraftOnePick(false);
+  }
+  renderDraft();
+}
+
+function applyDraftToRom() {
+  if (!draftState?.complete) {
+    els.draftStatus.textContent = "Finish the draft before applying it to the ROM.";
+    return;
+  }
+  let changed = 0;
+  draftState.rosters.forEach((roster, teamIndex) => {
+    const team = playerTable.teams[teamIndex];
+    roster.forEach((player, teamSlot) => {
+      if (!player) return;
+      const slotIndex = team.startSlot + teamSlot;
+      pendingNameEdits.set(slotIndex, player.name);
+      if (player.number !== null) pendingNumberEdits.set(slotIndex, player.number);
+      writePlayerAttributeValues(slotIndex, player.attributes);
+      changed += 1;
+    });
+  });
+  renderPlayers();
+  renderDraft();
+  els.draftStatus.textContent = `Staged ${changed} drafted players. Review the Players tab, then Apply All Changes or Export ROM.`;
+}
+
+function resetDraft() {
+  draftState = null;
+  renderDraft();
+}
+
+function renderDraftTeamSelect() {
+  const previous = Number(els.draftUserTeam.value || 0);
+  els.draftUserTeam.innerHTML = "";
+  if (!playerTable) return;
+  playerTable.teams.forEach((team) => {
+    const option = document.createElement("option");
+    option.value = String(team.index);
+    option.textContent = team.name;
+    els.draftUserTeam.append(option);
+  });
+  els.draftUserTeam.value = String(Math.min(previous, playerTable.teams.length - 1));
+}
+
+function renderDraft() {
+  const supported = Boolean(playerTable?.format === "tsb-pointer" && playerAttributeTable?.supported);
+  els.startDraft.disabled = !supported;
+  els.draftUserTeam.disabled = !supported || Boolean(draftState?.active);
+  els.draftSearch.disabled = !draftState;
+  els.draftPositionFilter.disabled = !draftState;
+  els.autoDraft.disabled = !draftState || draftState.complete || currentDraftTeamIndex() === draftState.userTeamIndex;
+  els.draftForMe.disabled = !draftState || draftState.complete || currentDraftTeamIndex() !== draftState.userTeamIndex;
+  els.applyDraft.disabled = !draftState?.complete;
+  els.resetDraft.disabled = !draftState;
+
+  if (!supported) {
+    els.draftStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM to start a native roster shuffle.";
+    els.draftPickSummary.textContent = "No draft started.";
+    els.draftNeeds.textContent = "Start a draft to see open slots.";
+    els.draftBoard.innerHTML = "";
+    els.draftLog.innerHTML = "";
+    return;
+  }
+
+  if (!draftState) {
+    els.draftStatus.textContent = "Smart Shuffle drafts from the loaded ROM's original player records. Names, jersey numbers, and attributes move together.";
+    els.draftPickSummary.textContent = "No draft started.";
+    els.draftNeeds.textContent = "Start a draft to see open slots.";
+    els.draftBoard.innerHTML = "";
+    els.draftLog.innerHTML = "";
+    return;
+  }
+
+  const teamIndex = currentDraftTeamIndex();
+  const team = playerTable.teams[teamIndex];
+  const isUserPick = teamIndex === draftState.userTeamIndex;
+  const draftedCount = draftState.pool.filter((player) => player.drafted).length;
+  els.draftStatus.textContent = draftState.complete
+    ? `Draft complete. ${draftedCount} players selected.`
+    : `${draftPickLabel()}: ${team.name} is on the clock.${isUserPick ? " Choose a player below." : " Use Auto Draft To My Pick."}`;
+  els.draftPickSummary.innerHTML = draftState.complete
+    ? "<strong>Draft complete.</strong>"
+    : `<strong>${escapeHtml(team.name)}</strong><br>${escapeHtml(draftPickLabel())}<br>${draftedCount} of ${draftState.totalPicks} players drafted`;
+
+  const roster = draftState.complete ? draftState.rosters[draftState.userTeamIndex] : draftState.rosters[teamIndex];
+  const counts = draftGroupCounts(roster);
+  els.draftNeeds.innerHTML = DRAFT_GROUP_ORDER.map((group) => `
+    <span class="need-pill${counts[group].open ? "" : " filled"}">${group}: ${counts[group].open}</span>
+  `).join("");
+
+  const query = els.draftSearch.value.trim().toLowerCase();
+  const groupFilter = els.draftPositionFilter.value || "ALL";
+  const eligibleTeam = draftState.complete ? draftState.userTeamIndex : teamIndex;
+  const rows = draftEligiblePlayersForTeam(eligibleTeam)
+    .filter((player) => groupFilter === "ALL" || player.group === groupFilter)
+    .filter((player) => !query || player.name.toLowerCase().includes(query) || player.sourceTeam.toLowerCase().includes(query))
+    .sort((a, b) => b.rating - a.rating)
+    .slice(0, 80)
+    .map((player) => `
+      <tr>
+        <td>${player.drafted ? "" : draftOpenSlotForPlayer(draftState.rosters[eligibleTeam], player) >= 0 ? TSB_POSITIONS_30[draftOpenSlotForPlayer(draftState.rosters[eligibleTeam], player)] : ""}</td>
+        <td>${escapeHtml(player.name)}</td>
+        <td>${player.number === null ? "" : tsbNumberByteToJersey(player.number)}</td>
+        <td>${escapeHtml(player.sourceTeam)}</td>
+        <td>${escapeHtml(player.sourceRole)}</td>
+        <td>${player.rating}</td>
+        <td>${!draftState.complete && isUserPick ? `<button type="button" data-draft-player="${player.id}">Draft</button>` : ""}</td>
+      </tr>
+    `).join("");
+  els.draftBoard.innerHTML = rows || "<tr><td colspan=\"7\">No eligible players available for this filter.</td></tr>";
+  els.draftLog.innerHTML = draftState.log.slice(0, 160).map((entry) => `<div>${escapeHtml(entry)}</div>`).join("");
 }
 
 function swapTsbPlayerSlots(sourceSlot, targetTeamSlot) {
@@ -2302,9 +2609,9 @@ function scanAscii() {
 
 async function exportRom() {
   return withWork("Exporting ROM", "Committing pending changes...", async () => {
-    if (pendingNameEdits.size) {
+    if (pendingNameEdits.size || pendingNumberEdits.size) {
       applyPlayerNameEdits();
-      if (pendingNameEdits.size) return;
+      if (pendingNameEdits.size || pendingNumberEdits.size) return;
     }
     if (pendingTeamEdits.size) {
       try {
@@ -2493,6 +2800,30 @@ els.teamSelect.addEventListener("change", () => {
   syncMaddenTeamToSelectedTecmoTeam();
   renderPlayers();
   renderMaddenPreview();
+});
+els.startDraft.addEventListener("click", startSmartDraft);
+els.autoDraft.addEventListener("click", () => withWork("Auto Drafting", "Running AI picks until your team is on the clock...", async () => {
+  autoDraftToUserPick();
+  updateWork("Auto draft stopped.", 1, 1);
+}, 1));
+els.draftForMe.addEventListener("click", () => {
+  autoDraftOnePick(true);
+  renderDraft();
+});
+els.applyDraft.addEventListener("click", () => withWork("Applying Draft", "Staging drafted rosters...", async () => {
+  applyDraftToRom();
+  updateWork("Draft staged.", 1, 1);
+}, 1));
+els.resetDraft.addEventListener("click", resetDraft);
+els.draftSearch.addEventListener("input", renderDraft);
+els.draftPositionFilter.addEventListener("change", renderDraft);
+els.draftBoard.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-draft-player]");
+  if (!button || !draftState) return;
+  const teamIndex = currentDraftTeamIndex();
+  if (teamIndex !== draftState.userTeamIndex) return;
+  const player = draftState.pool.find((candidate) => candidate.id === Number(button.dataset.draftPlayer));
+  if (draftPlayerForTeam(teamIndex, player)) renderDraft();
 });
 els.identityTeamSelect.addEventListener("change", renderTeams);
 els.teamIdentityEditor.addEventListener("input", (event) => {
