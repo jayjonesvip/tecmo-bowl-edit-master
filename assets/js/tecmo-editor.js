@@ -1563,7 +1563,7 @@ function startAutomaticDraft() {
   els.closeDraftModal.disabled = true;
   updateAutomaticDraftModal();
   stopAutomaticDraft();
-  automaticDraftTimer = setInterval(runAutomaticDraftStep, 1200);
+  automaticDraftTimer = setInterval(runAutomaticDraftStep, 300);
   runAutomaticDraftStep();
   renderDraft();
 }
