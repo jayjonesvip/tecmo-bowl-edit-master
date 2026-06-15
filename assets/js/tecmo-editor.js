@@ -282,6 +282,8 @@ const TSB_FACE_IDS = [
 ];
 const TSB_FACE_ID_SET = new Set(TSB_FACE_IDS);
 const TSB_FACE_ASSET_PATH = "./assets/faces";
+const DRAFT_BACKUP_SLOTS = new Set(["QB2", "RB3", "RB4", "WR3", "WR4", "TE2"]);
+const AUTOMATIC_DRAFT_PICK_MS = 40;
 
 const ATTRIBUTE_LABELS_BY_ROLE = {
   QB: ["Running Speed", "Rushing Power", "Maximum Speed", "Hitting Power", "Passing Speed", "Pass Control", "Passing Accuracy", "Avoid Pass Block"],
@@ -1396,6 +1398,17 @@ function draftGroupForTeamSlot(teamSlot) {
   return slotRoleForTeamSlot(teamSlot).groups[0] || "REC";
 }
 
+function draftPhaseForTeamSlot(teamSlot) {
+  return DRAFT_BACKUP_SLOTS.has(TSB_POSITIONS_30[teamSlot]) ? 1 : 0;
+}
+
+function draftCurrentPhase(roster) {
+  for (let phase = 0; phase <= 1; phase += 1) {
+    if (roster.some((player, teamSlot) => !player && draftPhaseForTeamSlot(teamSlot) === phase)) return phase;
+  }
+  return 2;
+}
+
 function draftGroupCounts(roster) {
   const counts = Object.fromEntries(DRAFT_GROUP_ORDER.map((group) => [group, { open: 0, filled: 0 }]));
   roster.forEach((player, teamSlot) => {
@@ -1408,8 +1421,9 @@ function draftGroupCounts(roster) {
 
 function draftOpenSlotForPlayer(roster, player) {
   const groups = player.groups?.length ? player.groups : [player.group];
+  const phase = draftCurrentPhase(roster);
   for (let teamSlot = 0; teamSlot < TSB_POSITIONS_30.length; teamSlot += 1) {
-    if (!roster[teamSlot] && groups.includes(draftGroupForTeamSlot(teamSlot))) return teamSlot;
+    if (!roster[teamSlot] && draftPhaseForTeamSlot(teamSlot) === phase && groups.includes(draftGroupForTeamSlot(teamSlot))) return teamSlot;
   }
   return -1;
 }
@@ -1506,10 +1520,15 @@ function startManualDraft() {
 function draftScorePlayer(teamIndex, player) {
   const roster = draftState.rosters[teamIndex];
   const counts = draftGroupCounts(roster);
-  const openInGroup = counts[player.group]?.open || 0;
+  const phase = draftCurrentPhase(roster);
+  const openInGroup = roster.filter((slotPlayer, teamSlot) => (
+    !slotPlayer
+    && draftPhaseForTeamSlot(teamSlot) === phase
+    && player.groups.includes(draftGroupForTeamSlot(teamSlot))
+  )).length;
   const filledInGroup = counts[player.group]?.filled || 0;
   const scarcity = draftState.pool.filter((candidate) => !candidate.drafted && candidate.group === player.group).length;
-  const needBonus = openInGroup * 8 - filledInGroup * 1.5;
+  const needBonus = openInGroup * 12 - filledInGroup;
   const scarcityBonus = scarcity ? Math.max(0, 18 - scarcity / 2) : 0;
   return player.rating + needBonus + scarcityBonus + draftState.random() * 6;
 }
@@ -1605,7 +1624,7 @@ function startAutomaticDraft() {
   els.closeDraftModal.disabled = true;
   updateAutomaticDraftModal();
   stopAutomaticDraft();
-  automaticDraftTimer = setInterval(runAutomaticDraftStep, 300);
+  automaticDraftTimer = setInterval(runAutomaticDraftStep, AUTOMATIC_DRAFT_PICK_MS);
   runAutomaticDraftStep();
   renderDraft();
 }
