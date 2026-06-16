@@ -45,6 +45,7 @@ const els = {
   downloadChangelog: document.querySelector("#download-changelog"),
   changelogOutput: document.querySelector("#changelog-output"),
   teamSelect: document.querySelector("#team-select"),
+  importTeamSelect: document.querySelector("#import-team-select"),
   draftUserTeam: document.querySelector("#draft-user-team"),
   draftMode: document.querySelector("#draft-mode"),
   randomizeDraft: document.querySelector("#randomize-draft"),
@@ -526,6 +527,7 @@ function enableControls(enabled) {
   els.applyHack.disabled = !enabled || !selectedPatch;
   els.copySet.disabled = !selectedPatch;
   els.teamSelect.disabled = !enabled || !playerTable;
+  els.importTeamSelect.disabled = !enabled || !playerTable;
   els.identityTeamSelect.disabled = !enabled || !teamStringTable;
   els.updateTeamNames.disabled = !enabled || !teamStringTable;
   els.applyTeamChanges.disabled = !enabled || (!pendingTeamEdits.size && !pendingTeamAiEdits.size);
@@ -1096,13 +1098,16 @@ function renderTeamAi(teamIndex) {
 
 function fillTeamSelect() {
   els.teamSelect.innerHTML = "";
+  els.importTeamSelect.innerHTML = "";
   if (!playerTable) return;
   playerTable.teams.forEach((team) => {
     const option = document.createElement("option");
     option.value = String(team.index);
     option.textContent = `${team.name} (${team.slots})`;
     els.teamSelect.append(option);
+    els.importTeamSelect.append(option.cloneNode(true));
   });
+  els.importTeamSelect.value = els.teamSelect.value;
 }
 
 function fillIdentityTeamSelect() {
@@ -2049,8 +2054,9 @@ function renderPlayers() {
   }
 
   const team = playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
+  els.importTeamSelect.value = String(team.index);
   els.rosterHeading.textContent = `Roster Slots: ${team.name}`;
-  els.maddenHeading.textContent = `Madden Import: ${team.name}`;
+  els.maddenHeading.textContent = `External Player Data: ${team.name}`;
   els.playerStatus.textContent = playerTable.format === "tsb-pointer"
     ? `${playerTable.kind}: ${playerTable.count} players, pointer table at ${hex(playerTable.pointerStart)}, name data at ${hex(playerTable.dataStart)}.`
     : `${playerTable.kind}: ${playerTable.count} names, ${playerTable.slotLength} bytes each, starting at ${hex(playerTable.start)}.`;
@@ -2470,7 +2476,7 @@ function setMaddenPlayers(players, sourceLabel) {
   const teams = Array.from(new Set(maddenPlayers.map((player) => player.team).filter(Boolean))).sort();
   els.maddenTeamSelect.innerHTML = teams.map((team) => `<option value="${escapeHtml(team)}">${escapeHtml(team)}</option>`).join("");
   syncMaddenTeamToSelectedTecmoTeam();
-  els.maddenStatus.textContent = `${maddenPlayers.length} Madden player(s) loaded from ${sourceLabel}. TSB imports use first LAST formatting and a ${TSB_IMPORT_NAME_LIMIT}-character encoded-name limit.`;
+  els.maddenStatus.textContent = `${maddenPlayers.length} external player record(s) loaded from ${sourceLabel}. Imports use first LAST formatting and a ${TSB_IMPORT_NAME_LIMIT}-character encoded-name limit.`;
   renderMaddenPreview();
   enableControls(Boolean(rom));
 }
@@ -2480,6 +2486,18 @@ function syncMaddenTeamToSelectedTecmoTeam() {
   const team = playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
   const players = maddenPlayersForTecmoTeam(team.name);
   if (players.length) els.maddenTeamSelect.value = players[0].team;
+}
+
+function selectTecmoTeam(teamIndex) {
+  const team = playerTable?.teams[Number(teamIndex || 0)];
+  if (team) {
+    els.teamSelect.value = String(team.index);
+    els.importTeamSelect.value = String(team.index);
+    selectedPlayerSlot = team.startSlot;
+  }
+  syncMaddenTeamToSelectedTecmoTeam();
+  renderPlayers();
+  renderMaddenPreview();
 }
 
 function teamAliasesForCurrentTeam() {
@@ -2518,19 +2536,19 @@ function renderMaddenPreview() {
       <td>${player.agi || ""}</td>
       <td>${player.awr || ""}</td>
     </tr>
-  `).join("") || "<tr><td colspan=\"9\">No Madden players available for this team yet.</td></tr>";
+  `).join("") || "<tr><td colspan=\"9\">No external players available for this team yet.</td></tr>";
 }
 
 async function importMaddenRatings() {
-  return withWork("Importing Madden Ratings", "Connecting to EA ratings...", async () => {
-    els.maddenStatus.textContent = "Fetching Madden ratings...";
+  return withWork("Loading Player Data", "Connecting to external player data...", async () => {
+    els.maddenStatus.textContent = "Fetching external player data...";
     const players = [];
     const seen = new Set();
     try {
-      if (!HAS_LOCAL_PROXY) throw new Error("Static hosting uses bundled Madden ratings.");
+      if (!HAS_LOCAL_PROXY) throw new Error("Static hosting uses bundled player data.");
       for (let page = 1; page <= 22; page += 1) {
-        updateWork(`Fetching Madden ratings page ${page} of 22...`, page - 1, 22);
-        els.maddenStatus.textContent = `Fetching Madden ratings page ${page}...`;
+        updateWork(`Fetching player data page ${page} of 22...`, page - 1, 22);
+        els.maddenStatus.textContent = `Fetching player data page ${page}...`;
         const response = await fetch(`/madden-ratings?page=${page}`);
         if (!response.ok) throw new Error(`local proxy returned ${response.status}`);
         const html = await response.text();
@@ -2543,28 +2561,28 @@ async function importMaddenRatings() {
             players.push(player);
           }
         });
-        updateWork(`Loaded ${players.length.toLocaleString()} Madden players...`, page, 22);
+        updateWork(`Loaded ${players.length.toLocaleString()} player records...`, page, 22);
       }
       if (!players.length) throw new Error("Could not parse player rows from EA.");
-      setMaddenPlayers(players, "EA ratings via local proxy");
-      updateWork(`Loaded ${players.length.toLocaleString()} Madden players.`, 22, 22);
+      setMaddenPlayers(players, "live ratings source");
+      updateWork(`Loaded ${players.length.toLocaleString()} player records.`, 22, 22);
     } catch (error) {
-      updateWork("EA is unavailable. Loading fallback Madden roster...", 1, 2);
+      updateWork("Live source is unavailable. Loading bundled player data...", 1, 2);
       try {
         let response = await fetch(MADDEN_FALLBACK_URL);
-        let sourceLabel = "bundled Madden ratings data";
+        let sourceLabel = "bundled player data";
         if (!response.ok && HAS_LOCAL_PROXY) {
           response = await fetch("/madden-ratings-fallback");
-          sourceLabel = "Madden Ratings Hub fallback";
+          sourceLabel = "local fallback data";
         }
         if (!response.ok) throw new Error(`fallback ratings returned ${response.status}`);
         const fallbackPlayers = parseFallbackMaddenCsv(await response.text());
         if (!fallbackPlayers.length) throw new Error("fallback roster contained no players");
         setMaddenPlayers(fallbackPlayers, sourceLabel);
-        els.maddenStatus.textContent += " EA temporarily blocked detailed ratings, so conversions will use the available bulk ratings.";
-        updateWork(`Loaded ${fallbackPlayers.length.toLocaleString()} fallback Madden players.`, 2, 2);
+        els.maddenStatus.textContent += " Live detail data is unavailable, so conversions will use the available bulk ratings.";
+        updateWork(`Loaded ${fallbackPlayers.length.toLocaleString()} fallback player records.`, 2, 2);
       } catch (fallbackError) {
-        els.maddenStatus.textContent = `Madden import failed: ${error.message}. Fallback also failed: ${fallbackError.message}. Paste CSV rows below as a fallback.`;
+        els.maddenStatus.textContent = `Player data import failed: ${error.message}. Fallback also failed: ${fallbackError.message}. Paste CSV rows below as a fallback.`;
       }
     }
   }, 22);
@@ -2636,17 +2654,17 @@ async function applyMaddenNamesToCurrentTeam() {
   const selectedMaddenTeam = els.maddenTeamSelect.value || TECMO_TO_MADDEN_TEAMS[team.name];
   const players = maddenPlayers.filter((player) => player.team === selectedMaddenTeam).slice().sort((a, b) => (b.ovr || 0) - (a.ovr || 0));
   if (!players.length) {
-    els.maddenStatus.textContent = `No Madden players found for ${selectedMaddenTeam || team.name}.`;
+    els.maddenStatus.textContent = `No external players found for ${selectedMaddenTeam || team.name}.`;
     return;
   }
   const assignments = buildMaddenAssignments(team, players);
-  return withWork(`Filling ${team.name}`, "Preparing selected team...", async () => {
+  return withWork(`Syncing ${team.name}`, "Preparing selected team...", async () => {
     const detailed = await enrichAssignments(assignments, ({ player }, completed, total) => {
       updateWork(`${team.name}: loading ${player.name}`, completed, total);
     });
     applyMaddenAssignments(assignments);
     renderPlayers();
-    els.maddenStatus.textContent = `Filled ${assignments.length} ${team.name} roster slot(s) with formatted names and converted ratings. Loaded detailed ratings for ${detailed}; remaining conversions used bulk-rating fallbacks. Review, then Apply All Changes.`;
+    els.maddenStatus.textContent = `Synced ${assignments.length} ${team.name} roster slot(s) with formatted names and converted ratings. Loaded detailed ratings for ${detailed}; remaining conversions used bulk-rating fallbacks. Review, then Apply All Changes.`;
   }, assignments.length);
 }
 
@@ -2663,14 +2681,14 @@ async function applyMaddenToAllTeams() {
     allAssignments.push(...buildMaddenAssignments(team, players).map((assignment) => ({ ...assignment, tecmoTeam: team.name })));
   });
 
-  return withWork("Filling All Teams", "Preparing all 28 rosters...", async () => {
+  return withWork("Syncing All Teams", "Preparing all 28 rosters...", async () => {
     const detailed = await enrichAssignments(allAssignments, ({ player, tecmoTeam }, completed, total) => {
       updateWork(`${tecmoTeam}: loading ${player.name}`, completed, total);
     });
     applyMaddenAssignments(allAssignments);
     renderPlayers();
     const unchanged = playerTable.count - allAssignments.length;
-    els.maddenStatus.textContent = `Filled ${allAssignments.length} roster slots across ${playerTable.teams.length - missing.length} teams with converted Madden ratings; ${unchanged} slot(s) stayed unchanged because current Madden rosters have fewer than 30 unique rated players. Loaded detailed ratings for ${detailed}.${missing.length ? ` Missing Madden teams: ${missing.join(", ")}.` : ""} Review, then Apply All Changes.`;
+    els.maddenStatus.textContent = `Synced ${allAssignments.length} roster slots across ${playerTable.teams.length - missing.length} teams with converted external ratings; ${unchanged} slot(s) stayed unchanged because the player data has fewer than 30 unique rated players. Loaded detailed ratings for ${detailed}.${missing.length ? ` Missing external teams: ${missing.join(", ")}.` : ""} Review, then Apply All Changes.`;
   }, allAssignments.length);
 }
 
@@ -3497,13 +3515,8 @@ els.applySet.addEventListener("click", () => {
     els.setStatus.textContent = error.message;
   }
 });
-els.teamSelect.addEventListener("change", () => {
-  const team = playerTable?.teams[Number(els.teamSelect.value || 0)];
-  if (team) selectedPlayerSlot = team.startSlot;
-  syncMaddenTeamToSelectedTecmoTeam();
-  renderPlayers();
-  renderMaddenPreview();
-});
+els.teamSelect.addEventListener("change", () => selectTecmoTeam(els.teamSelect.value));
+els.importTeamSelect.addEventListener("change", () => selectTecmoTeam(els.importTeamSelect.value));
 els.draftMode.addEventListener("change", renderDraft);
 els.randomizeDraft.addEventListener("click", randomizeDraftOrder);
 els.startDraft.addEventListener("click", () => {
@@ -3701,7 +3714,7 @@ els.applyMaddenAll.addEventListener("click", applyMaddenToAllTeams);
 els.parseMaddenPaste.addEventListener("click", () => {
   const players = parseMaddenPlayersFromText(els.maddenPaste.value);
   if (!players.length) {
-    els.maddenStatus.textContent = "No CSV/TSV Madden rows found. Use columns: Name, Team, Position, OVR, SPD, STR, AGI, AWR.";
+    els.maddenStatus.textContent = "No CSV/TSV player rows found. Use columns: Name, Team, Position, OVR, SPD, STR, AGI, AWR.";
     return;
   }
   setMaddenPlayers(players, "pasted data");

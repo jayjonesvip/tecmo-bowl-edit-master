@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tecmo ROM Workshop</title>
-  <meta name="description" content="Browser-based Tecmo Super Bowl NES ROM editor for rosters, ratings, teams, colors, playbooks, AI tendencies, Madden imports, and gameplay patches.">
+  <meta name="description" content="Browser-based Tecmo Super Bowl NES ROM editor for rosters, ratings, teams, colors, playbooks, AI tendencies, external player imports, and gameplay patches.">
   <link rel="stylesheet" href="assets/css/tecmo-editor.css">
 </head>
 <body>
@@ -51,6 +51,7 @@
     <section class="main-panel">
       <nav class="tabs" aria-label="Editor views">
         <button class="tab active" type="button" data-view="players">Players</button>
+        <button class="tab" type="button" data-view="import">Import Players</button>
         <button class="tab" type="button" data-view="draft">Draft</button>
         <button class="tab" type="button" data-view="teams">Teams</button>
         <button class="tab" type="button" data-view="colors">Colors</button>
@@ -66,7 +67,6 @@
             <select id="team-select" disabled></select>
           </div>
           <div class="player-actions">
-            <button id="import-madden" type="button" disabled>Import From Madden</button>
             <button id="apply-player-names" type="button" disabled>Apply All Changes</button>
           </div>
         </div>
@@ -93,23 +93,30 @@
             <div id="player-diff" class="hack-detail">Edit a name to preview its bytes.</div>
           </section>
         </div>
+      </section>
 
+      <section id="view-import" class="view">
         <section class="human-section set-box">
-          <h2 id="madden-heading">Madden Import</h2>
+          <h2 id="madden-heading">External Player Data</h2>
           <div class="view-bar">
             <div class="control-group">
-              <label for="madden-team-select">Madden team</label>
+              <label for="import-team-select">Tecmo team</label>
+              <select id="import-team-select" disabled></select>
+            </div>
+            <div class="control-group">
+              <label for="madden-team-select">External team</label>
               <select id="madden-team-select" disabled></select>
             </div>
             <div class="player-actions">
-              <button id="apply-madden-team" type="button" disabled>Fill Selected Team Slots</button>
-              <button id="apply-madden-all" type="button" disabled>Fill All Teams</button>
+              <button id="import-madden" type="button" disabled>Load Player Data</button>
+              <button id="apply-madden-team" type="button" disabled>Sync Selected Team</button>
+              <button id="apply-madden-all" type="button" disabled>Sync All Teams</button>
             </div>
           </div>
-          <div id="madden-status" class="muted">Use Import From Madden to load current ratings, then choose a team.</div>
-          <textarea id="madden-paste" spellcheck="false" placeholder="Fallback: paste Madden rows as CSV with columns Name, Team, Position, OVR, SPD, STR, AGI, AWR, Jersey Number"></textarea>
+          <div id="madden-status" class="muted">Load external player data, then choose a team to sync into the Tecmo roster.</div>
+          <textarea id="madden-paste" spellcheck="false" placeholder="Fallback: paste player rows as CSV with columns Name, Team, Position, OVR, SPD, STR, AGI, AWR, Jersey Number"></textarea>
           <div class="patch-actions">
-            <button id="parse-madden-paste" type="button">Parse Pasted Madden Data</button>
+            <button id="parse-madden-paste" type="button">Parse Pasted Player Data</button>
           </div>
           <table class="madden-preview">
             <thead>
