@@ -68,6 +68,8 @@ const els = {
   teamIdentityHeading: document.querySelector("#team-identity-heading"),
   teamIdentityStatus: document.querySelector("#team-identity-status"),
   teamIdentityEditor: document.querySelector("#team-identity-editor"),
+  teamAiStatus: document.querySelector("#team-ai-status"),
+  teamAiEditor: document.querySelector("#team-ai-editor"),
   teamNameDiff: document.querySelector("#team-name-diff"),
   updateTeamNames: document.querySelector("#update-team-names"),
   applyTeamChanges: document.querySelector("#apply-team-changes"),
@@ -116,6 +118,7 @@ let selectedPlayerSlot = 0;
 let pendingNameEdits = new Map();
 let pendingNumberEdits = new Map();
 let pendingTeamEdits = new Map();
+let pendingTeamAiEdits = new Map();
 let pendingColorEdits = new Map();
 let maddenPlayers = [];
 let draftState = null;
@@ -142,6 +145,18 @@ const TSB_TEAM_NAMES_28 = [
 ];
 
 const TEAM_COLOR_BASE = 0x31140;
+const TEAM_AI_PREF_START = 0x27526;
+const TEAM_SIM_DATA_START = 0x18192;
+const TEAM_SIM_DATA_STRIDE = 0x30;
+const TEAM_PLAYBOOK_START = 0x1D310;
+const TEAM_PLAYBOOK_STRIDE = 4;
+const PLAYBOOK_ASSET_PATH = "./assets/playbook";
+const TEAM_AI_PREF_OPTIONS = [
+  { value: 0, label: "Little More Rushing" },
+  { value: 1, label: "Heavy Rushing" },
+  { value: 2, label: "Little More Passing" },
+  { value: 3, label: "Heavy Passing" },
+];
 const SHARED_TEAM_COLOR_OFFSETS = [
   { label: "Team Screen Shared 1", offset: 0x31E89 },
   { label: "Team Screen Shared 2", offset: 0x31E8A },
@@ -475,6 +490,7 @@ function setLoadedRom(bytes, name) {
   pendingNameEdits = new Map();
   pendingNumberEdits = new Map();
   pendingTeamEdits = new Map();
+  pendingTeamAiEdits = new Map();
   pendingColorEdits = new Map();
   selectedPlayerSlot = 0;
   draftState = null;
@@ -507,7 +523,7 @@ function enableControls(enabled) {
   els.teamSelect.disabled = !enabled || !playerTable;
   els.identityTeamSelect.disabled = !enabled || !teamStringTable;
   els.updateTeamNames.disabled = !enabled || !teamStringTable;
-  els.applyTeamChanges.disabled = !enabled || !pendingTeamEdits.size;
+  els.applyTeamChanges.disabled = !enabled || (!pendingTeamEdits.size && !pendingTeamAiEdits.size);
   els.colorTeamSelect.disabled = !enabled || !looksLikeTsbRom();
   els.applyColorChanges.disabled = !enabled || !pendingColorEdits.size;
   els.applyPlayerNames.disabled = !enabled || (!pendingNameEdits.size && !pendingNumberEdits.size);
@@ -947,6 +963,131 @@ function cleanTeamText(value, maxLength = 18) {
     .slice(0, maxLength);
 }
 
+function teamAiOffset(kind, teamIndex) {
+  if (kind === "preference") return TEAM_AI_PREF_START + teamIndex;
+  if (kind === "sim") return TEAM_SIM_DATA_START + teamIndex * TEAM_SIM_DATA_STRIDE;
+  if (kind === "playbook") return TEAM_PLAYBOOK_START + teamIndex * TEAM_PLAYBOOK_STRIDE;
+  return null;
+}
+
+function pendingOrCurrentByte(offset) {
+  if (!rom || offset === null || offset < 0 || offset >= rom.length) return null;
+  return pendingTeamAiEdits.get(offset) ?? rom[offset];
+}
+
+function playbookByteOffset(teamIndex, slotType, slotIndex) {
+  const base = teamAiOffset("playbook", teamIndex);
+  if (base === null) return null;
+  return base + (slotType === "run" ? 0 : 2) + Math.floor(slotIndex / 2);
+}
+
+function readPlaybookSlot(teamIndex, slotType, slotIndex) {
+  const offset = playbookByteOffset(teamIndex, slotType, slotIndex);
+  const byte = pendingOrCurrentByte(offset);
+  if (byte === null) return null;
+  return slotIndex % 2 === 0 ? (byte >> 4) & 0x0F : byte & 0x0F;
+}
+
+function stagePlaybookSlot(teamIndex, slotType, slotIndex, playIndex) {
+  const offset = playbookByteOffset(teamIndex, slotType, slotIndex);
+  if (offset === null) return;
+  const currentByte = pendingOrCurrentByte(offset);
+  if (currentByte === null) return;
+  const nibble = Math.max(0, Math.min(7, playIndex)) & 0x0F;
+  const nextByte = slotIndex % 2 === 0
+    ? ((nibble << 4) | (currentByte & 0x0F))
+    : ((currentByte & 0xF0) | nibble);
+  stageTeamAiByte(offset, nextByte);
+}
+
+function stageTeamAiByte(offset, value) {
+  if (!rom || offset === null || offset < 0 || offset >= rom.length) return;
+  const byte = value & 0xFF;
+  if (byte === rom[offset]) pendingTeamAiEdits.delete(offset);
+  else pendingTeamAiEdits.set(offset, byte);
+}
+
+function teamAiSetDiffs() {
+  return Array.from(pendingTeamAiEdits.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([offset, value]) => ({ offset, hex: byteHex(value) }));
+}
+
+function playbookImage(slotType, slotIndex, playIndex) {
+  const prefix = slotType === "run" ? "R" : "P";
+  return `${PLAYBOOK_ASSET_PATH}/${prefix}${slotIndex + 1}-${playIndex}.BMP`;
+}
+
+function playbookSlotHtml(teamIndex, slotType, slotIndex) {
+  const playIndex = readPlaybookSlot(teamIndex, slotType, slotIndex);
+  const prefix = slotType === "run" ? "R" : "P";
+  const playLabel = `${prefix}${slotIndex + 1}`;
+  return `
+    <div class="playbook-card">
+      <div class="playbook-card-head">
+        <span>${playLabel}</span>
+        <select data-playbook-slot="${slotType}:${slotIndex}" aria-label="${playLabel} play">
+          ${Array.from({ length: 8 }, (_, index) => `
+            <option value="${index}"${playIndex === index ? " selected" : ""}>${index + 1}</option>
+          `).join("")}
+        </select>
+      </div>
+      ${playIndex === null ? "" : `<img src="${playbookImage(slotType, slotIndex, playIndex)}" alt="${playLabel}-${playIndex + 1}" loading="lazy">`}
+    </div>
+  `;
+}
+
+function renderTeamAi(teamIndex) {
+  if (!rom || !looksLikeTsbRom()) {
+    els.teamAiStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM to edit team AI tendencies.";
+    els.teamAiEditor.innerHTML = "";
+    return;
+  }
+
+  const preferenceOffset = teamAiOffset("preference", teamIndex);
+  const simOffset = teamAiOffset("sim", teamIndex);
+  const playbookOffset = teamAiOffset("playbook", teamIndex);
+  const preference = pendingOrCurrentByte(preferenceOffset);
+  const simData = pendingOrCurrentByte(simOffset);
+  const offense = simData === null ? 0 : (simData >> 4) & 0x0F;
+  const defense = simData === null ? 0 : simData & 0x0F;
+
+  els.teamAiStatus.textContent = `AI bytes: tendency ${hex(preferenceOffset)}, sim ${hex(simOffset)}, playbook ${hex(playbookOffset)}-${hex(playbookOffset + 3)}.`;
+  els.teamAiEditor.innerHTML = `
+    <section class="team-ai-section">
+      <h3>CPU Play Calling</h3>
+      <label class="team-ai-field">
+        <span>Run/Pass Preference</span>
+        <select data-team-ai-pref>
+          ${TEAM_AI_PREF_OPTIONS.map((option) => `
+            <option value="${option.value}"${preference === option.value ? " selected" : ""}>${option.label}</option>
+          `).join("")}
+        </select>
+      </label>
+    </section>
+    <section class="team-ai-section">
+      <h3>Simulation Strength</h3>
+      <div class="team-ai-two">
+        <label class="team-ai-field">
+          <span>Offense</span>
+          <input data-team-sim-nibble="offense" type="number" min="0" max="15" value="${offense}">
+        </label>
+        <label class="team-ai-field">
+          <span>Defense</span>
+          <input data-team-sim-nibble="defense" type="number" min="0" max="15" value="${defense}">
+        </label>
+      </div>
+    </section>
+    <section class="team-ai-section">
+      <h3>Playbook</h3>
+      <div class="playbook-grid">
+        ${Array.from({ length: 4 }, (_, index) => playbookSlotHtml(teamIndex, "run", index)).join("")}
+        ${Array.from({ length: 4 }, (_, index) => playbookSlotHtml(teamIndex, "pass", index)).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function fillTeamSelect() {
   els.teamSelect.innerHTML = "";
   if (!playerTable) return;
@@ -1081,6 +1222,7 @@ function renderTeams() {
     els.teamIdentityHeading.textContent = "Team Identity";
     els.teamIdentityStatus.textContent = "This ROM does not contain the supported 28-team Tecmo Super Bowl string table.";
     els.teamIdentityEditor.innerHTML = "";
+    renderTeamAi(0);
     els.teamNameDiff.textContent = "Load the 28-team Tecmo Super Bowl ROM to edit team names.";
     enableControls(Boolean(rom));
     return;
@@ -1107,12 +1249,14 @@ function renderTeams() {
       <input id="team-nickname" data-team-string-index="${teamIndex + 64}" maxlength="18" value="${escapeHtml(identity.nickname)}">
     </div>
   `;
+  renderTeamAi(teamIndex);
   renderTeamDiff();
   enableControls(Boolean(rom));
 }
 
 function renderTeamDiff() {
-  if (!teamStringTable || !pendingTeamEdits.size) {
+  const aiSets = teamAiSetDiffs();
+  if ((!teamStringTable || !pendingTeamEdits.size) && !aiSets.length) {
     els.teamNameDiff.textContent = "Edit a team or update all team names to preview changes.";
     enableControls(Boolean(rom));
     return;
@@ -1133,12 +1277,24 @@ function renderTeamDiff() {
       </div>
     `;
   }).join("");
-  const image = buildTeamStringTableImage(false);
+  const image = teamStringTable ? buildTeamStringTableImage(false) : null;
+  const textSummary = teamIndexes.length
+    ? `
+      <h3>${teamIndexes.length} team${teamIndexes.length === 1 ? "" : "s"} pending</h3>
+      <p>Applying rebuilds the pointer-based string table and preserves its non-team labels.</p>
+      <p>${image.dataEnd - teamStringTable.dataStart} of ${teamStringTable.limit - teamStringTable.dataStart} string-data bytes will be used.</p>
+      <div class="team-text-diff">${rows}</div>
+    `
+    : "";
+  const aiSummary = aiSets.length
+    ? `
+      <h3>${aiSets.length} pending AI byte${aiSets.length === 1 ? "" : "s"}</h3>
+      ${renderSetDiff(aiSets)}
+    `
+    : "";
   els.teamNameDiff.innerHTML = `
-    <h3>${teamIndexes.length} team${teamIndexes.length === 1 ? "" : "s"} pending</h3>
-    <p>Applying rebuilds the pointer-based string table and preserves its non-team labels.</p>
-    <p>${image.dataEnd - teamStringTable.dataStart} of ${teamStringTable.limit - teamStringTable.dataStart} string-data bytes will be used.</p>
-    <div class="team-text-diff">${rows}</div>
+    ${textSummary}
+    ${aiSummary}
   `;
   enableControls(Boolean(rom));
 }
@@ -1195,6 +1351,15 @@ function applyTeamStringEdits() {
   renderTeams();
   renderHex();
   return changed;
+}
+
+function applyTeamAiEdits() {
+  const sets = teamAiSetDiffs();
+  if (!sets.length) return 0;
+  const written = applySets(sets);
+  pendingTeamAiEdits.clear();
+  renderTeams();
+  return written;
 }
 
 function stageModernTeamNames() {
@@ -2787,6 +2952,14 @@ async function exportRom() {
         return;
       }
     }
+    if (pendingTeamAiEdits.size) {
+      try {
+        applyTeamAiEdits();
+      } catch (error) {
+        els.teamAiStatus.textContent = `Could not export team AI changes: ${error.message}`;
+        return;
+      }
+    }
     if (pendingColorEdits.size) {
       try {
         applyColorEdits();
@@ -3026,15 +3199,47 @@ els.teamIdentityEditor.addEventListener("change", () => {
   fillIdentityTeamSelect();
   renderTeams();
 });
+els.teamAiEditor.addEventListener("change", (event) => {
+  const teamIndex = Number(els.identityTeamSelect.value || 0);
+  const preference = event.target.closest("[data-team-ai-pref]");
+  if (preference) {
+    stageTeamAiByte(teamAiOffset("preference", teamIndex), Number(preference.value));
+    renderTeams();
+    return;
+  }
+
+  const simNibble = event.target.closest("[data-team-sim-nibble]");
+  if (simNibble) {
+    const offset = teamAiOffset("sim", teamIndex);
+    const current = pendingOrCurrentByte(offset);
+    if (current === null) return;
+    const value = Math.max(0, Math.min(15, Number(simNibble.value || 0))) & 0x0F;
+    simNibble.value = String(value);
+    const next = simNibble.dataset.teamSimNibble === "offense"
+      ? ((value << 4) | (current & 0x0F))
+      : ((current & 0xF0) | value);
+    stageTeamAiByte(offset, next);
+    renderTeams();
+    return;
+  }
+
+  const playbook = event.target.closest("[data-playbook-slot]");
+  if (playbook) {
+    const [slotType, slotIndex] = playbook.dataset.playbookSlot.split(":");
+    stagePlaybookSlot(teamIndex, slotType, Number(slotIndex), Number(playbook.value));
+    renderTeams();
+  }
+});
 els.updateTeamNames.addEventListener("click", () => withWork("Updating Team Names", "Staging modern team identities...", async () => {
   stageModernTeamNames();
   updateWork("Modern team identities staged.", 28, 28);
 }, 28));
-els.applyTeamChanges.addEventListener("click", () => withWork("Applying Team Changes", "Rebuilding the team string table...", async () => {
+els.applyTeamChanges.addEventListener("click", () => withWork("Applying Team Changes", "Writing team edits...", async () => {
   try {
-    const changed = applyTeamStringEdits();
-    els.teamIdentityStatus.textContent = `Applied ${changed} team text field change${changed === 1 ? "" : "s"} to the working ROM.`;
-    updateWork("Team string table rebuilt.", 1, 1);
+    const textChanged = applyTeamStringEdits();
+    const aiChanged = applyTeamAiEdits();
+    els.teamIdentityStatus.textContent = `Applied ${textChanged} team text field change${textChanged === 1 ? "" : "s"} and ${aiChanged} AI byte${aiChanged === 1 ? "" : "s"} to the working ROM.`;
+    updateWork("Team changes written.", 1, 1);
   } catch (error) {
     els.teamIdentityStatus.textContent = `Could not apply team changes: ${error.message}`;
   }
