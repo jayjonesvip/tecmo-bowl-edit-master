@@ -97,8 +97,6 @@ const els = {
   maddenTeamSelect: document.querySelector("#madden-team-select"),
   applyMaddenTeam: document.querySelector("#apply-madden-team"),
   applyMaddenAll: document.querySelector("#apply-madden-all"),
-  maddenPaste: document.querySelector("#madden-paste"),
-  parseMaddenPaste: document.querySelector("#parse-madden-paste"),
   maddenPreview: document.querySelector("#madden-preview"),
   workOverlay: document.querySelector("#work-overlay"),
   workTitle: document.querySelector("#work-title"),
@@ -2485,8 +2483,27 @@ function renderImportPanel() {
   const hasPlayerData = maddenPlayers.length > 0;
   els.importStart.hidden = hasPlayerData;
   els.importWorkspace.hidden = !hasPlayerData;
-  const team = playerTable?.teams[Number(els.teamSelect.value || 0)];
+  const team = importTargetTeam();
   els.importTecmoTeamText.textContent = team ? team.name : "Select a team";
+}
+
+function importTargetTeam() {
+  const externalTeam = els.maddenTeamSelect.value;
+  const mappedIndex = tecmoTeamIndexForExternalTeam(externalTeam);
+  if (playerTable && mappedIndex >= 0) return playerTable.teams[mappedIndex];
+  if (!playerTable && mappedIndex >= 0) return { name: TSB_TEAM_NAMES_28[mappedIndex] };
+  if (!playerTable) return null;
+  return playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
+}
+
+function tecmoTeamIndexForExternalTeam(externalTeam) {
+  if (!externalTeam) return -1;
+  const normalized = String(externalTeam).toLowerCase();
+  const teams = playerTable?.teams || TSB_TEAM_NAMES_28.map((name, index) => ({ name, index }));
+  const exactIndex = teams.findIndex((team) => String(TECMO_TO_MADDEN_TEAMS[team.name] || "").toLowerCase() === normalized);
+  if (exactIndex >= 0) return exactIndex;
+  return teams.findIndex((team) => (MADDEN_TEAM_ALIASES[team.name] || [])
+    .some((alias) => String(alias).toLowerCase() === normalized));
 }
 
 function syncMaddenTeamToSelectedTecmoTeam() {
@@ -2545,6 +2562,18 @@ function renderMaddenPreview() {
       <td>${player.awr || ""}</td>
     </tr>
   `).join("") || "<tr><td colspan=\"9\">No external players available for this team yet.</td></tr>";
+}
+
+function syncSelectedExternalTeamToTecmoTeam() {
+  const teamIndex = tecmoTeamIndexForExternalTeam(els.maddenTeamSelect.value);
+  if (playerTable && teamIndex >= 0) {
+    const team = playerTable.teams[teamIndex];
+    els.teamSelect.value = String(team.index);
+    selectedPlayerSlot = team.startSlot;
+    renderPlayers();
+  }
+  renderImportPanel();
+  renderMaddenPreview();
 }
 
 async function importMaddenRatings() {
@@ -2658,7 +2687,7 @@ function maddenJerseyNumberToTsbByte(number) {
 
 async function applyMaddenNamesToCurrentTeam() {
   if (!playerTable) return;
-  const team = playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
+  const team = importTargetTeam() || playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
   const selectedMaddenTeam = els.maddenTeamSelect.value || TECMO_TO_MADDEN_TEAMS[team.name];
   const players = maddenPlayers.filter((player) => player.team === selectedMaddenTeam).slice().sort((a, b) => (b.ovr || 0) - (a.ovr || 0));
   if (!players.length) {
@@ -3715,18 +3744,9 @@ els.applyPlayerNames.addEventListener("click", () => withWork("Applying All Chan
   updateWork("Changes applied.", 1, 1);
 }, 1));
 els.importMadden.addEventListener("click", importMaddenRatings);
-els.maddenTeamSelect.addEventListener("change", renderMaddenPreview);
+els.maddenTeamSelect.addEventListener("change", syncSelectedExternalTeamToTecmoTeam);
 els.applyMaddenTeam.addEventListener("click", applyMaddenNamesToCurrentTeam);
 els.applyMaddenAll.addEventListener("click", applyMaddenToAllTeams);
-els.parseMaddenPaste.addEventListener("click", () => {
-  const players = parseMaddenPlayersFromText(els.maddenPaste.value);
-  if (!players.length) {
-    els.maddenStatus.textContent = "No CSV/TSV player rows found. Use columns: Name, Team, Position, OVR, SPD, STR, AGI, AWR.";
-    return;
-  }
-  setMaddenPlayers(players, "pasted data");
-});
-
 renderPalette();
 renderHackCategories();
 if (window.TECMO_BUNDLED_ROM_BASE64) {

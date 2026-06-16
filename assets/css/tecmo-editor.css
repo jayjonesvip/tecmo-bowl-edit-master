@@ -755,6 +755,11 @@ input[type="range"] {
   place-items: center;
 }
 
+.import-start[hidden],
+#import-workspace[hidden] {
+  display: none;
+}
+
 .import-start button {
   min-width: 220px;
   min-height: 52px;
