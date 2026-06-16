@@ -45,7 +45,9 @@ const els = {
   downloadChangelog: document.querySelector("#download-changelog"),
   changelogOutput: document.querySelector("#changelog-output"),
   teamSelect: document.querySelector("#team-select"),
-  importTeamSelect: document.querySelector("#import-team-select"),
+  importStart: document.querySelector("#import-start"),
+  importWorkspace: document.querySelector("#import-workspace"),
+  importTecmoTeamText: document.querySelector("#import-tecmo-team-text"),
   draftUserTeam: document.querySelector("#draft-user-team"),
   draftMode: document.querySelector("#draft-mode"),
   randomizeDraft: document.querySelector("#randomize-draft"),
@@ -517,17 +519,16 @@ function enableControls(enabled) {
     els.clearTile,
     els.copyTile,
     els.pasteTile,
-    els.importMadden,
     els.generateChangelog,
   ].forEach((el) => {
     el.disabled = !enabled || (el === els.pasteTile && !copiedTile);
   });
+  els.importMadden.disabled = maddenPlayers.length > 0;
   els.previewSet.disabled = !enabled || !els.setInput.value.trim();
   els.applySet.disabled = !enabled || !els.setInput.value.trim();
   els.applyHack.disabled = !enabled || !selectedPatch;
   els.copySet.disabled = !selectedPatch;
   els.teamSelect.disabled = !enabled || !playerTable;
-  els.importTeamSelect.disabled = !enabled || !playerTable;
   els.identityTeamSelect.disabled = !enabled || !teamStringTable;
   els.updateTeamNames.disabled = !enabled || !teamStringTable;
   els.applyTeamChanges.disabled = !enabled || (!pendingTeamEdits.size && !pendingTeamAiEdits.size);
@@ -538,6 +539,7 @@ function enableControls(enabled) {
   els.maddenTeamSelect.disabled = !maddenPlayers.length;
   els.applyMaddenTeam.disabled = !enabled || !playerTable || !maddenPlayers.length;
   els.applyMaddenAll.disabled = !enabled || playerTable?.format !== "tsb-pointer" || !maddenPlayers.length;
+  renderImportPanel();
 }
 
 function fillSelects() {
@@ -1098,16 +1100,13 @@ function renderTeamAi(teamIndex) {
 
 function fillTeamSelect() {
   els.teamSelect.innerHTML = "";
-  els.importTeamSelect.innerHTML = "";
   if (!playerTable) return;
   playerTable.teams.forEach((team) => {
     const option = document.createElement("option");
     option.value = String(team.index);
     option.textContent = `${team.name} (${team.slots})`;
     els.teamSelect.append(option);
-    els.importTeamSelect.append(option.cloneNode(true));
   });
-  els.importTeamSelect.value = els.teamSelect.value;
 }
 
 function fillIdentityTeamSelect() {
@@ -2054,9 +2053,9 @@ function renderPlayers() {
   }
 
   const team = playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
-  els.importTeamSelect.value = String(team.index);
   els.rosterHeading.textContent = `Roster Slots: ${team.name}`;
   els.maddenHeading.textContent = `External Player Data: ${team.name}`;
+  renderImportPanel();
   els.playerStatus.textContent = playerTable.format === "tsb-pointer"
     ? `${playerTable.kind}: ${playerTable.count} players, pointer table at ${hex(playerTable.pointerStart)}, name data at ${hex(playerTable.dataStart)}.`
     : `${playerTable.kind}: ${playerTable.count} names, ${playerTable.slotLength} bytes each, starting at ${hex(playerTable.start)}.`;
@@ -2478,7 +2477,16 @@ function setMaddenPlayers(players, sourceLabel) {
   syncMaddenTeamToSelectedTecmoTeam();
   els.maddenStatus.textContent = `${maddenPlayers.length} external player record(s) loaded from ${sourceLabel}. Imports use first LAST formatting and a ${TSB_IMPORT_NAME_LIMIT}-character encoded-name limit.`;
   renderMaddenPreview();
+  renderImportPanel();
   enableControls(Boolean(rom));
+}
+
+function renderImportPanel() {
+  const hasPlayerData = maddenPlayers.length > 0;
+  els.importStart.hidden = hasPlayerData;
+  els.importWorkspace.hidden = !hasPlayerData;
+  const team = playerTable?.teams[Number(els.teamSelect.value || 0)];
+  els.importTecmoTeamText.textContent = team ? team.name : "Select a team";
 }
 
 function syncMaddenTeamToSelectedTecmoTeam() {
@@ -2492,10 +2500,10 @@ function selectTecmoTeam(teamIndex) {
   const team = playerTable?.teams[Number(teamIndex || 0)];
   if (team) {
     els.teamSelect.value = String(team.index);
-    els.importTeamSelect.value = String(team.index);
     selectedPlayerSlot = team.startSlot;
   }
   syncMaddenTeamToSelectedTecmoTeam();
+  renderImportPanel();
   renderPlayers();
   renderMaddenPreview();
 }
@@ -3516,7 +3524,6 @@ els.applySet.addEventListener("click", () => {
   }
 });
 els.teamSelect.addEventListener("change", () => selectTecmoTeam(els.teamSelect.value));
-els.importTeamSelect.addEventListener("change", () => selectTecmoTeam(els.importTeamSelect.value));
 els.draftMode.addEventListener("change", renderDraft);
 els.randomizeDraft.addEventListener("click", randomizeDraftOrder);
 els.startDraft.addEventListener("click", () => {

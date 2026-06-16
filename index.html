@@ -97,33 +97,41 @@
 
       <section id="view-import" class="view">
         <section class="human-section set-box">
-          <h2 id="madden-heading">External Player Data</h2>
-          <div class="view-bar">
-            <div class="control-group">
-              <label for="import-team-select">Tecmo team</label>
-              <select id="import-team-select" disabled></select>
+          <div id="import-start" class="import-start">
+            <button id="import-madden" type="button">Import Players</button>
+          </div>
+
+          <div id="import-workspace" hidden>
+            <h2 id="madden-heading">External Player Data</h2>
+            <div class="import-sync-flow">
+              <section class="import-sync-card">
+                <h3>External</h3>
+                <label for="madden-team-select">Team</label>
+                <select id="madden-team-select" disabled></select>
+              </section>
+              <div class="import-arrow" aria-hidden="true">-></div>
+              <section class="import-sync-card import-sync-target">
+                <h3>Tecmo</h3>
+                <div id="import-tecmo-team-text" class="import-team-target">Select a team</div>
+              </section>
             </div>
-            <div class="control-group">
-              <label for="madden-team-select">External team</label>
-              <select id="madden-team-select" disabled></select>
-            </div>
-            <div class="player-actions">
-              <button id="import-madden" type="button" disabled>Load Player Data</button>
+
+            <div class="player-actions import-actions">
               <button id="apply-madden-team" type="button" disabled>Sync Selected Team</button>
               <button id="apply-madden-all" type="button" disabled>Sync All Teams</button>
             </div>
+            <div id="madden-status" class="muted">External player data loaded. Choose an external team, then sync it into the selected Tecmo team.</div>
+            <textarea id="madden-paste" spellcheck="false" placeholder="Fallback: paste player rows as CSV with columns Name, Team, Position, OVR, SPD, STR, AGI, AWR, Jersey Number"></textarea>
+            <div class="patch-actions">
+              <button id="parse-madden-paste" type="button">Parse Pasted Player Data</button>
+            </div>
+            <table class="madden-preview">
+              <thead>
+                <tr><th>Player</th><th>#</th><th>Pos</th><th>Team</th><th>OVR</th><th>SPD</th><th>STR</th><th>AGI</th><th>AWR</th></tr>
+              </thead>
+              <tbody id="madden-preview"></tbody>
+            </table>
           </div>
-          <div id="madden-status" class="muted">Load external player data, then choose a team to sync into the Tecmo roster.</div>
-          <textarea id="madden-paste" spellcheck="false" placeholder="Fallback: paste player rows as CSV with columns Name, Team, Position, OVR, SPD, STR, AGI, AWR, Jersey Number"></textarea>
-          <div class="patch-actions">
-            <button id="parse-madden-paste" type="button">Parse Pasted Player Data</button>
-          </div>
-          <table class="madden-preview">
-            <thead>
-              <tr><th>Player</th><th>#</th><th>Pos</th><th>Team</th><th>OVR</th><th>SPD</th><th>STR</th><th>AGI</th><th>AWR</th></tr>
-            </thead>
-            <tbody id="madden-preview"></tbody>
-          </table>
         </section>
       </section>
 
