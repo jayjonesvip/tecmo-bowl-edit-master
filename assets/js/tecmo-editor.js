@@ -991,7 +991,7 @@ function readPlaybookSlot(teamIndex, slotType, slotIndex) {
   const offset = playbookByteOffset(teamIndex, slotType, slotIndex);
   const byte = pendingOrCurrentByte(offset);
   if (byte === null) return null;
-  return slotIndex % 2 === 0 ? (byte >> 4) & 0x0F : byte & 0x0F;
+  return slotIndex % 2 === 0 ? (byte >> 4) & 0x07 : byte & 0x07;
 }
 
 function stagePlaybookSlot(teamIndex, slotType, slotIndex, playIndex) {
@@ -999,29 +999,10 @@ function stagePlaybookSlot(teamIndex, slotType, slotIndex, playIndex) {
   if (offset === null) return;
   const currentByte = pendingOrCurrentByte(offset);
   if (currentByte === null) return;
-  const currentNibble = readPlaybookSlot(teamIndex, slotType, slotIndex) ?? 0;
-  const nibble = (Math.max(0, Math.min(7, playIndex)) | (currentNibble & 0x08)) & 0x0F;
+  const nibble = Math.max(0, Math.min(7, playIndex)) & 0x07;
   const nextByte = slotIndex % 2 === 0
     ? ((nibble << 4) | (currentByte & 0x0F))
     : ((currentByte & 0xF0) | nibble);
-  stageTeamAiByte(offset, nextByte);
-}
-
-function flipPlaybookSlot(teamIndex, slotType, slotIndex) {
-  const currentNibble = readPlaybookSlot(teamIndex, slotType, slotIndex);
-  if (currentNibble === null) return;
-  stagePlaybookSlotNibble(teamIndex, slotType, slotIndex, currentNibble ^ 0x08);
-}
-
-function stagePlaybookSlotNibble(teamIndex, slotType, slotIndex, nibble) {
-  const offset = playbookByteOffset(teamIndex, slotType, slotIndex);
-  if (offset === null) return;
-  const currentByte = pendingOrCurrentByte(offset);
-  if (currentByte === null) return;
-  const nextNibble = nibble & 0x0F;
-  const nextByte = slotIndex % 2 === 0
-    ? ((nextNibble << 4) | (currentByte & 0x0F))
-    : ((currentByte & 0xF0) | nextNibble);
   stageTeamAiByte(offset, nextByte);
 }
 
@@ -1044,9 +1025,7 @@ function playbookImage(slotType, slotIndex, playIndex) {
 }
 
 function playbookSlotHtml(teamIndex, slotType, slotIndex) {
-  const playValue = readPlaybookSlot(teamIndex, slotType, slotIndex);
-  const playIndex = playValue === null ? null : playValue & 0x07;
-  const flipped = playValue !== null && Boolean(playValue & 0x08);
+  const playIndex = readPlaybookSlot(teamIndex, slotType, slotIndex);
   const prefix = slotType === "run" ? "R" : "P";
   const playLabel = `${prefix}${slotIndex + 1}`;
   return `
@@ -1059,8 +1038,7 @@ function playbookSlotHtml(teamIndex, slotType, slotIndex) {
           `).join("")}
         </select>
       </div>
-      ${playIndex === null ? "" : `<img class="${flipped ? "flipped-play" : ""}" src="${playbookImage(slotType, slotIndex, playIndex)}" alt="${playLabel}-${playIndex + 1}${flipped ? " flipped" : ""}" loading="lazy">`}
-      <button class="playbook-flip" data-playbook-flip="${slotType}:${slotIndex}" type="button">${flipped ? "Unflip" : "Flip"}</button>
+      ${playIndex === null ? "" : `<img src="${playbookImage(slotType, slotIndex, playIndex)}" alt="${playLabel}-${playIndex + 1}" loading="lazy">`}
     </div>
   `;
 }
@@ -2972,59 +2950,178 @@ function markdownEscape(value) {
   return String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
-function pendingRosterMarkdown() {
-  if (!playerTable || (!pendingNameEdits.size && !pendingNumberEdits.size)) return [];
-  const slots = Array.from(new Set([...pendingNameEdits.keys(), ...pendingNumberEdits.keys()])).sort((a, b) => a - b);
-  const lines = ["## Pending Roster Edits", "", "| Team | Slot | Name | Jersey |", "| --- | --- | --- | --- |"];
-  slots.forEach((slotIndex) => {
+function playerPointerToOffsetFromBytes(bytes, pointerOffset) {
+  const pointer = bytes[pointerOffset] | (bytes[pointerOffset + 1] << 8);
+  return pointer - 0x8000 + 0x10;
+}
+
+function playerSlotOffsetFromBytes(bytes, slotIndex) {
+  if (playerTable.format === "tsb-pointer") {
+    return playerPointerToOffsetFromBytes(bytes, playerTable.pointerStart + slotIndex * 2);
+  }
+  return playerTable.start + slotIndex * playerTable.slotLength;
+}
+
+function readPlayerNameFromBytes(bytes, slotIndex) {
+  const offset = playerSlotOffsetFromBytes(bytes, slotIndex);
+  if (playerTable.format === "tsb-pointer") {
+    const nextOffset = playerPointerToOffsetFromBytes(bytes, playerTable.pointerStart + (slotIndex + 1) * 2);
+    const encoded = Array.from(bytes.slice(offset + 1, nextOffset), (byte) => String.fromCharCode(byte)).join("");
+    const lastNameStart = encoded.search(/[A-Z]/);
+    if (lastNameStart < 0) return encoded;
+    return `${encoded.slice(0, lastNameStart)} ${encoded.slice(lastNameStart)}`.trim();
+  }
+  return romNameToDisplay(bytes.slice(offset, offset + playerTable.slotLength));
+}
+
+function readPlayerNumberFromBytes(bytes, slotIndex) {
+  if (playerTable?.format !== "tsb-pointer") return null;
+  return bytes[playerSlotOffsetFromBytes(bytes, slotIndex)];
+}
+
+function teamStringOffsetFromBytes(bytes, stringIndex) {
+  const pointerOffset = teamStringTable.start + stringIndex * 2;
+  const pointer = bytes[pointerOffset] | (bytes[pointerOffset + 1] << 8);
+  return teamStringTable.start + pointer - teamStringTable.pointerAdjustment;
+}
+
+function readTeamStringFromBytes(bytes, stringIndex) {
+  const start = teamStringOffsetFromBytes(bytes, stringIndex);
+  const end = teamStringOffsetFromBytes(bytes, stringIndex + 1);
+  return Array.from(bytes.slice(start, end), (byte) => String.fromCharCode(byte)).join("");
+}
+
+function teamIdentityFromBytes(bytes, teamIndex) {
+  return {
+    abbreviation: readTeamStringFromBytes(bytes, teamIndex),
+    city: readTeamStringFromBytes(bytes, teamIndex + 32),
+    nickname: readTeamStringFromBytes(bytes, teamIndex + 64),
+  };
+}
+
+function readPlaybookSlotFromBytes(bytes, teamIndex, slotType, slotIndex) {
+  const offset = playbookByteOffset(teamIndex, slotType, slotIndex);
+  if (offset === null || offset < 0 || offset >= bytes.length) return null;
+  const byte = bytes[offset];
+  return slotIndex % 2 === 0 ? (byte >> 4) & 0x07 : byte & 0x07;
+}
+
+function teamLabelForMarkdown(bytes, teamIndex) {
+  if (teamStringTable) {
+    try {
+      const identity = teamIdentityFromBytes(bytes, teamIndex);
+      return `${identity.city} ${identity.nickname}`.trim() || TSB_TEAM_NAMES_28[teamIndex] || `Team ${teamIndex + 1}`;
+    } catch (_) {
+      return TSB_TEAM_NAMES_28[teamIndex] || `Team ${teamIndex + 1}`;
+    }
+  }
+  return TSB_TEAM_NAMES_28[teamIndex] || `Team ${teamIndex + 1}`;
+}
+
+function preferenceLabel(value) {
+  return TEAM_AI_PREF_OPTIONS.find((option) => option.value === value)?.label || `Unknown (${value})`;
+}
+
+function rosterMarkdown(beforeBytes, afterBytes) {
+  if (!playerTable) return [];
+  const rows = [];
+  for (let slotIndex = 0; slotIndex < playerTable.count; slotIndex += 1) {
+    const beforeName = readPlayerNameFromBytes(beforeBytes, slotIndex);
+    const afterName = readPlayerNameFromBytes(afterBytes, slotIndex);
+    const beforeNumber = readPlayerNumberFromBytes(beforeBytes, slotIndex);
+    const afterNumber = readPlayerNumberFromBytes(afterBytes, slotIndex);
+    if (beforeName === afterName && beforeNumber === afterNumber) continue;
     const teamIndex = Math.floor(slotIndex / playerTable.slotsPerTeam);
     const role = TSB_POSITIONS_30[slotIndex % playerTable.slotsPerTeam] || `Slot ${slotIndex + 1}`;
-    const team = playerTable.teams[teamIndex]?.name || `Team ${teamIndex + 1}`;
-    const beforeName = readPlayerName(slotIndex);
-    const afterName = pendingNameEdits.get(slotIndex) ?? beforeName;
-    const beforeNumber = readStoredPlayerNumber(slotIndex);
-    const afterNumber = readPlayerNumber(slotIndex);
+    const team = playerTable.teams[teamIndex]?.name || teamLabelForMarkdown(afterBytes, teamIndex);
     const jersey = beforeNumber === afterNumber
       ? tsbNumberByteToJersey(afterNumber)
       : `${tsbNumberByteToJersey(beforeNumber)} -> ${tsbNumberByteToJersey(afterNumber)}`;
-    lines.push(`| ${markdownEscape(team)} | ${markdownEscape(role)} | ${markdownEscape(beforeName)} -> ${markdownEscape(afterName)} | ${markdownEscape(jersey)} |`);
-  });
-  return lines;
+    rows.push(`| ${markdownEscape(team)} | ${markdownEscape(role)} | ${markdownEscape(beforeName)} -> ${markdownEscape(afterName)} | ${markdownEscape(jersey)} |`);
+  }
+  return rows.length ? ["## Roster Changes", "", "| Team | Slot | Name | Jersey |", "| --- | --- | --- | --- |", ...rows] : [];
 }
 
-function pendingTeamMarkdown() {
-  const lines = [];
-  if (teamStringTable && pendingTeamEdits.size) {
-    const teamIndexes = Array.from(new Set(Array.from(pendingTeamEdits.keys()).map((index) => index % 32)))
-      .filter((index) => index < teamStringTable.teamCount)
-      .sort((a, b) => a - b);
-    lines.push("## Pending Team Name Edits", "", "| Team | Before | After |", "| --- | --- | --- |");
-    teamIndexes.forEach((teamIndex) => {
-      const before = `${readTeamString(teamIndex + 32)} ${readTeamString(teamIndex + 64)} (${readTeamString(teamIndex)})`;
-      const afterIdentity = teamIdentity(teamIndex);
-      const after = `${afterIdentity.city} ${afterIdentity.nickname} (${afterIdentity.abbreviation})`;
-      lines.push(`| ${teamIndex + 1} | ${markdownEscape(before)} | ${markdownEscape(after)} |`);
+function teamNameMarkdown(beforeBytes, afterBytes) {
+  if (!teamStringTable) return [];
+  const rows = [];
+  for (let teamIndex = 0; teamIndex < teamStringTable.teamCount; teamIndex += 1) {
+    const before = teamIdentityFromBytes(beforeBytes, teamIndex);
+    const after = teamIdentityFromBytes(afterBytes, teamIndex);
+    const beforeText = `${before.city} ${before.nickname} (${before.abbreviation})`;
+    const afterText = `${after.city} ${after.nickname} (${after.abbreviation})`;
+    if (beforeText !== afterText) rows.push(`| ${teamIndex + 1} | ${markdownEscape(beforeText)} | ${markdownEscape(afterText)} |`);
+  }
+  return rows.length ? ["## Team Name Changes", "", "| Team | Before | After |", "| --- | --- | --- |", ...rows] : [];
+}
+
+function teamAiMarkdown(beforeBytes, afterBytes) {
+  if (!looksLikeTsbRom()) return [];
+  const rows = [];
+  for (let teamIndex = 0; teamIndex < TSB_TEAM_NAMES_28.length; teamIndex += 1) {
+    const team = teamLabelForMarkdown(afterBytes, teamIndex);
+    const preferenceOffset = teamAiOffset("preference", teamIndex);
+    const beforePref = beforeBytes[preferenceOffset];
+    const afterPref = afterBytes[preferenceOffset];
+    if (beforePref !== afterPref) {
+      rows.push(`| ${markdownEscape(team)} | CPU play calling | ${markdownEscape(preferenceLabel(beforePref))} | ${markdownEscape(preferenceLabel(afterPref))} | ${hex(preferenceOffset)} |`);
+    }
+
+    const simOffset = teamAiOffset("sim", teamIndex);
+    const beforeSim = beforeBytes[simOffset];
+    const afterSim = afterBytes[simOffset];
+    if (beforeSim !== afterSim) {
+      rows.push(`| ${markdownEscape(team)} | Simulation strength | Off ${(beforeSim >> 4) & 0x0F}, Def ${beforeSim & 0x0F} | Off ${(afterSim >> 4) & 0x0F}, Def ${afterSim & 0x0F} | ${hex(simOffset)} |`);
+    }
+
+    ["run", "pass"].forEach((slotType) => {
+      for (let slotIndex = 0; slotIndex < 4; slotIndex += 1) {
+        const beforePlay = readPlaybookSlotFromBytes(beforeBytes, teamIndex, slotType, slotIndex);
+        const afterPlay = readPlaybookSlotFromBytes(afterBytes, teamIndex, slotType, slotIndex);
+        if (beforePlay === afterPlay) continue;
+        const label = `${slotType === "run" ? "Run" : "Pass"} ${slotIndex + 1}`;
+        rows.push(`| ${markdownEscape(team)} | ${label} play | ${beforePlay + 1} | ${afterPlay + 1} | ${hex(playbookByteOffset(teamIndex, slotType, slotIndex))} |`);
+      }
     });
   }
-  return lines;
+  return rows.length ? ["## Team AI and Playbook Changes", "", "| Team | Item | Before | After | Offset |", "| --- | --- | --- | --- | --- |", ...rows] : [];
 }
 
-function pendingAiMarkdown() {
-  if (!pendingTeamAiEdits.size) return [];
-  const lines = ["## Pending Team AI / Playbook Edits", "", "| Offset | Current | New |", "| --- | --- | --- |"];
-  Array.from(pendingTeamAiEdits.entries()).sort(([a], [b]) => a - b).forEach(([offset, value]) => {
-    lines.push(`| ${hex(offset)} | ${byteHex(rom[offset])} | ${byteHex(value)} |`);
-  });
-  return lines;
+function colorOffsetLabels() {
+  const labels = new Map();
+  TSB_TEAM_NAMES_28.forEach((team, index) => labels.set(TEAM_COLOR_BASE + index, `${team} team data screen color`));
+  [...SHARED_TEAM_COLOR_OFFSETS, ...MENU_COLOR_OFFSETS, ...PRO_BOWL_COLOR_OFFSETS].forEach((item) => labels.set(item.offset, item.label));
+  return labels;
 }
 
-function pendingColorMarkdown() {
-  if (!pendingColorEdits.size) return [];
-  const lines = ["## Pending Color Edits", "", "| Offset | Current | New |", "| --- | --- | --- |"];
-  Array.from(pendingColorEdits.entries()).sort(([a], [b]) => a - b).forEach(([offset, value]) => {
-    lines.push(`| ${hex(offset)} | ${byteHex(rom[offset])} | ${byteHex(value)} |`);
+function colorMarkdown(beforeBytes, afterBytes) {
+  const rows = [];
+  colorOffsetLabels().forEach((label, offset) => {
+    if (offset < 0 || offset >= beforeBytes.length || beforeBytes[offset] === afterBytes[offset]) return;
+    rows.push(`| ${markdownEscape(label)} | ${hex(offset)} | ${byteHex(beforeBytes[offset])} | ${byteHex(afterBytes[offset])} |`);
   });
-  return lines;
+  return rows.length ? ["## Color Changes", "", "| Item | Offset | Before | After |", "| --- | --- | --- | --- |", ...rows] : [];
+}
+
+function regionForOffset(offset) {
+  if (playerTable) {
+    const pointerEnd = playerTable.pointerStart + (playerTable.count + 1) * 2;
+    if (offset >= playerTable.pointerStart && offset < pointerEnd) return "Roster pointer table";
+    if (offset >= playerTable.dataStart && offset < playerTable.dataLimit) return "Roster names";
+  }
+  if (playerAttributeTable && offset >= playerAttributeTable.start && offset < playerAttributeTable.start + playerAttributeTable.teamStride * 28) return "Player attributes";
+  if (teamStringTable) {
+    if (offset >= teamStringTable.start && offset < teamStringTable.dataStart) return "Team-name pointer table";
+    if (offset >= teamStringTable.dataStart && offset < teamStringTable.limit) return "Team names";
+  }
+  if (offset >= TEAM_AI_PREF_START && offset < TEAM_AI_PREF_START + 28) return "CPU play calling";
+  if (offset >= TEAM_SIM_DATA_START && offset < TEAM_SIM_DATA_START + TEAM_SIM_DATA_STRIDE * 28) return "Simulation strength";
+  if (offset >= TEAM_PLAYBOOK_START && offset < TEAM_PLAYBOOK_START + TEAM_PLAYBOOK_STRIDE * 28) return "Team playbooks";
+  if (colorOffsetLabels().has(offset)) return "Known palette/color byte";
+  if (meta && offset >= meta.chrOffset && offset < meta.chrOffset + meta.chrSize) return "CHR graphics";
+  if (meta && offset >= meta.prgOffset && offset < meta.prgOffset + meta.prgSize) return "PRG code/data";
+  if (offset < 0x10) return "NES header";
+  return "Unmapped bytes";
 }
 
 function buildChangeLogMarkdown() {
@@ -3043,22 +3140,27 @@ function buildChangeLogMarkdown() {
     "",
   ];
 
-  [
-    pendingRosterMarkdown(),
-    pendingTeamMarkdown(),
-    pendingAiMarkdown(),
-    pendingColorMarkdown(),
-  ].forEach((section) => {
+  const humanSections = [
+    rosterMarkdown(originalRom, snapshot),
+    teamNameMarkdown(originalRom, snapshot),
+    teamAiMarkdown(originalRom, snapshot),
+    colorMarkdown(originalRom, snapshot),
+  ];
+  const hasHumanSections = humanSections.some((section) => section.length);
+  if (!hasHumanSections && ranges.length) {
+    lines.push("## Human-Readable Changes", "", "No mapped roster, team, AI, playbook, or color changes were detected. See the byte audit for raw ROM edits.", "");
+  }
+  humanSections.forEach((section) => {
     if (section.length) lines.push(...section, "");
   });
 
-  lines.push("## Byte Audit", "");
+  lines.push("## PRG / Hex Byte Audit", "");
   if (!ranges.length) {
     lines.push("No byte changes detected from the original loaded ROM.");
   } else {
-    lines.push("| Offset | Length | Original | Edited |", "| --- | ---: | --- | --- |");
+    lines.push("| Offset | Region | Length | Original | Edited |", "| --- | --- | ---: | --- | --- |");
     ranges.slice(0, 400).forEach((range) => {
-      lines.push(`| ${hex(range.offset)} | ${range.before.length} | \`${markdownBytePreview(range.before)}\` | \`${markdownBytePreview(range.after)}\` |`);
+      lines.push(`| ${hex(range.offset)} | ${markdownEscape(regionForOffset(range.offset))} | ${range.before.length} | \`${markdownBytePreview(range.before)}\` | \`${markdownBytePreview(range.after)}\` |`);
     });
     if (ranges.length > 400) {
       lines.push("", `Only the first 400 byte ranges are listed. ${ranges.length - 400} additional range(s) were omitted.`);
@@ -3491,14 +3593,6 @@ els.teamAiEditor.addEventListener("change", (event) => {
     stagePlaybookSlot(teamIndex, slotType, Number(slotIndex), Number(playbook.value));
     renderTeams();
   }
-});
-els.teamAiEditor.addEventListener("click", (event) => {
-  const flipButton = event.target.closest("[data-playbook-flip]");
-  if (!flipButton) return;
-  const teamIndex = Number(els.identityTeamSelect.value || 0);
-  const [slotType, slotIndex] = flipButton.dataset.playbookFlip.split(":");
-  flipPlaybookSlot(teamIndex, slotType, Number(slotIndex));
-  renderTeams();
 });
 els.updateTeamNames.addEventListener("click", () => withWork("Syncing Modern Team Names", "Staging modern team identities...", async () => {
   stageModernTeamNames();

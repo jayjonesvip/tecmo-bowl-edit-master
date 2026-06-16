@@ -1,6 +1,12 @@
 # Tecmo ROM Workshop
 
-A static, browser-based editor for the original 28-team NES version of Tecmo Super Bowl.
+A GitHub Pages-ready browser editor for the original 28-team NES Tecmo Super Bowl ROM, with roster imports, player ratings, team names, uniforms, playbooks, AI tendencies, gameplay patches, and exportable ROM change logs.
+
+Suggested GitHub repo description:
+
+```text
+Browser-based Tecmo Super Bowl NES ROM editor for rosters, ratings, teams, colors, playbooks, AI tendencies, gameplay patches, and Madden roster imports.
+```
 
 ## GitHub Pages Deployment
 
