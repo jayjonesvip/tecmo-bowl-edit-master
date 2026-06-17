@@ -174,10 +174,6 @@ const MENU_COLOR_OFFSETS = [
   { label: "Main Menu Background 4", offset: 0x1A859 },
   { label: "Schedule Background", offset: 0x1A860 },
 ];
-const PRO_BOWL_COLOR_OFFSETS = Array.from({ length: 16 }, (_, index) => ({
-  label: `Pro Bowl Uniform ${index + 1}`,
-  offset: 0x2C3FC + index,
-}));
 
 const TECMO_TO_MADDEN_TEAMS = {
   BUF: "Buffalo Bills", IND: "Indianapolis Colts", MIA: "Miami Dolphins", NE: "New England Patriots", NYJ: "New York Jets",
@@ -1207,11 +1203,6 @@ function renderColors() {
       <h3>Menus</h3>
       ${MENU_COLOR_OFFSETS.map((item) => colorSelect(item.label, item.offset)).join("")}
     </section>
-    <section class="color-section">
-      <h3>Pro Bowl Uniform Bytes</h3>
-      <p class="muted">These are the mapped Pro Bowl color bytes at 0x02C3FC-0x02C40B. Labels are generic until we verify each byte in-game.</p>
-      ${PRO_BOWL_COLOR_OFFSETS.map((item) => colorSelect(item.label, item.offset)).join("")}
-    </section>
   `;
   renderColorDiff();
 }
@@ -1552,10 +1543,14 @@ function writePlayerAttributeValues(slotIndex, values) {
   }
 }
 
-function draftRatingFromAttributes(attrs) {
+function draftRatingFromAttributes(attrs, roleLabel = "") {
   if (!attrs?.values?.length) return 0;
   const ratings = attrs.values.map((nibble) => TSB_ATTRIBUTE_VALUE_STEPS[nibble] || 0);
-  return Math.round(ratings.reduce((sum, value) => sum + value, 0) / ratings.length);
+  const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+  const group = draftGroupForTeamSlot(TSB_POSITIONS_30.indexOf(roleLabel));
+  const positionFactor = { QB: 1.08, RB: 1.10, REC: 1.07, DB: 1.02, LB: 1.00, DL: 0.98, OL: 0.92, K: 0.55, P: 0.50 }[group] || 1;
+  const starterBonus = DRAFT_BACKUP_SLOTS.has(roleLabel) ? 0 : 4;
+  return Math.round((average * positionFactor) + starterBonus);
 }
 
 function shuffledIndexes(count, random) {
@@ -1643,7 +1638,7 @@ function buildDraftPool() {
       name,
       number: readPlayerNumber(slotIndex),
       attributes: attrs?.values?.slice() || [],
-      rating: draftRatingFromAttributes(attrs),
+      rating: draftRatingFromAttributes(attrs, role.label),
       drafted: false,
     });
   }
@@ -1844,6 +1839,33 @@ function renderDraftTeamSelect() {
   els.draftUserTeam.value = String(Math.min(previous, playerTable.teams.length - 1));
 }
 
+function filteredDraftPlayers(players) {
+  const query = els.draftSearch.value.trim().toLowerCase();
+  const groupFilter = els.draftPositionFilter.value || "ALL";
+  return players
+    .filter((player) => groupFilter === "ALL" || player.group === groupFilter)
+    .filter((player) => !query || player.name.toLowerCase().includes(query) || player.sourceTeam.toLowerCase().includes(query))
+    .sort((a, b) => b.rating - a.rating);
+}
+
+function renderDraftBoardRows(players, eligibleTeam = -1, canDraft = false) {
+  const rows = filteredDraftPlayers(players).slice(0, 80).map((player) => {
+    const openSlot = eligibleTeam >= 0 ? draftOpenSlotForPlayer(draftState.rosters[eligibleTeam], player) : -1;
+    return `
+      <tr>
+        <td>${openSlot >= 0 ? TSB_POSITIONS_30[openSlot] : ""}</td>
+        <td>${escapeHtml(player.name)}</td>
+        <td>${player.number === null ? "" : tsbNumberByteToJersey(player.number)}</td>
+        <td>${escapeHtml(player.sourceTeam)}</td>
+        <td>${escapeHtml(player.sourceRole)}</td>
+        <td>${player.rating}</td>
+        <td>${canDraft ? `<button type="button" data-draft-player="${player.id}">Draft</button>` : ""}</td>
+      </tr>
+    `;
+  }).join("");
+  els.draftBoard.innerHTML = rows || "<tr><td colspan=\"7\">No players available for this filter.</td></tr>";
+}
+
 function renderDraft() {
   const supported = supportedDraftLoaded();
   const mode = els.draftMode.value || "manual";
@@ -1853,8 +1875,8 @@ function renderDraft() {
   els.randomizeDraft.disabled = !supported || mode !== "manual" || Boolean(draftState);
   els.startDraft.disabled = !supported || (mode === "manual" ? (!hasOrder || started) : Boolean(draftState));
   els.draftUserTeam.disabled = !supported || Boolean(draftState?.active);
-  els.draftSearch.disabled = !draftState;
-  els.draftPositionFilter.disabled = !draftState;
+  els.draftSearch.disabled = !supported;
+  els.draftPositionFilter.disabled = !supported;
   els.autoDraft.disabled = !draftState?.started || draftState.complete || currentDraftTeamIndex() === draftState.userTeamIndex;
   els.draftForMe.disabled = !draftState?.started || draftState.complete || currentDraftTeamIndex() !== draftState.userTeamIndex;
   els.completeDraft.disabled = !draftState || draftState.complete || (mode === "manual" && !draftState.started);
@@ -1878,7 +1900,7 @@ function renderDraft() {
     els.draftPickSummary.textContent = "No draft started.";
     els.draftOrder.textContent = "Randomize the draft order to begin.";
     els.draftNeeds.textContent = "Start a draft to see open slots.";
-    els.draftBoard.innerHTML = "";
+    renderDraftBoardRows(buildDraftPool());
     els.draftLog.innerHTML = "";
     return;
   }
@@ -1907,26 +1929,8 @@ function renderDraft() {
     <span class="need-pill${counts[group].open ? "" : " filled"}">${group}: ${counts[group].open}</span>
   `).join("");
 
-  const query = els.draftSearch.value.trim().toLowerCase();
-  const groupFilter = els.draftPositionFilter.value || "ALL";
   const eligibleTeam = draftState.complete || !draftState.started ? draftState.userTeamIndex : teamIndex;
-  const rows = draftEligiblePlayersForTeam(eligibleTeam)
-    .filter((player) => groupFilter === "ALL" || player.group === groupFilter)
-    .filter((player) => !query || player.name.toLowerCase().includes(query) || player.sourceTeam.toLowerCase().includes(query))
-    .sort((a, b) => b.rating - a.rating)
-    .slice(0, 80)
-    .map((player) => `
-      <tr>
-        <td>${player.drafted ? "" : draftOpenSlotForPlayer(draftState.rosters[eligibleTeam], player) >= 0 ? TSB_POSITIONS_30[draftOpenSlotForPlayer(draftState.rosters[eligibleTeam], player)] : ""}</td>
-        <td>${escapeHtml(player.name)}</td>
-        <td>${player.number === null ? "" : tsbNumberByteToJersey(player.number)}</td>
-        <td>${escapeHtml(player.sourceTeam)}</td>
-        <td>${escapeHtml(player.sourceRole)}</td>
-        <td>${player.rating}</td>
-        <td>${draftState.started && !draftState.complete && isUserPick ? `<button type="button" data-draft-player="${player.id}">Draft</button>` : ""}</td>
-      </tr>
-    `).join("");
-  els.draftBoard.innerHTML = rows || "<tr><td colspan=\"7\">No eligible players available for this filter.</td></tr>";
+  renderDraftBoardRows(draftEligiblePlayersForTeam(eligibleTeam), eligibleTeam, draftState.started && !draftState.complete && isUserPick);
   els.draftLog.innerHTML = draftState.log.slice(0, 160).map((entry) => `<div>${escapeHtml(entry)}</div>`).join("");
 }
 
@@ -2140,6 +2144,12 @@ function applyPlayerNameEdits() {
   } catch (error) {
     els.maddenStatus.textContent = `Could not apply roster changes: ${error.message}`;
   }
+}
+
+function applyPendingRosterChanges() {
+  const before = pendingNameEdits.size + pendingNumberEdits.size;
+  applyPlayerNameEdits();
+  return before === 0 || pendingNameEdits.size + pendingNumberEdits.size === 0;
 }
 
 function rebuildTsbNameBlock() {
@@ -2393,12 +2403,12 @@ function parseFallbackMaddenCsv(text) {
       agi: Number(row.agi) || 0,
       awr: Number(row.awr) || 0,
     };
-    const jerseyNumber = String(row.jerseynumber || "").trim() === "" ? null : Number(row.jerseynumber);
+    const jerseyNumber = numberFromCsvRow(row);
     return {
       name: `${row.firstname || ""} ${row.lastname || ""}`.trim(),
       team: row.team || "",
       position: row.position || "",
-      jerseyNumber: Number.isInteger(jerseyNumber) ? jerseyNumber : null,
+      jerseyNumber,
       ratings,
       ovr: ratings.ovr,
       spd: ratings.spd,
@@ -2466,10 +2476,10 @@ async function enrichMaddenPlayer(player) {
 }
 
 function setMaddenPlayers(players, sourceLabel) {
-  maddenPlayers = players.filter((player) => player.name).map((player) => ({
+  maddenPlayers = fillMissingJerseyNumbers(players.filter((player) => player.name).map((player) => ({
     ...player,
     tsbName: formatTsbDisplayName(player.name),
-  }));
+  })));
   const teams = Array.from(new Set(maddenPlayers.map((player) => player.team).filter(Boolean))).sort();
   els.maddenTeamSelect.innerHTML = teams.map((team) => `<option value="${escapeHtml(team)}">${escapeHtml(team)}</option>`).join("");
   syncMaddenTeamToSelectedTecmoTeam();
@@ -2685,6 +2695,52 @@ function maddenJerseyNumberToTsbByte(number) {
   return (Math.floor(value / 10) << 4) | (value % 10);
 }
 
+function numberFromCsvRow(row) {
+  const value = row.jerseynumber ?? row.jerseyno ?? row.jersey ?? row.number ?? row.no ?? row.num ?? row.uniformnumber ?? row.playernumber ?? row[""] ?? "";
+  const parsed = Number(String(value).replace(/[^0-9]/g, ""));
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 99 ? parsed : null;
+}
+
+function preferredJerseyNumbersForPosition(position) {
+  const group = POSITION_GROUPS[String(position || "").toUpperCase().trim()] || "";
+  const ranges = {
+    QB: [[1, 19]],
+    RB: [[20, 49]],
+    REC: [[10, 19], [80, 89]],
+    OL: [[50, 79]],
+    DL: [[90, 99], [50, 79]],
+    LB: [[40, 59], [90, 99]],
+    DB: [[20, 49]],
+    K: [[1, 19]],
+    P: [[1, 19]],
+  }[group] || [[1, 99]];
+  return ranges.flatMap(([start, end]) => Array.from({ length: end - start + 1 }, (_, index) => start + index));
+}
+
+function fillMissingJerseyNumbers(players) {
+  const byTeam = new Map();
+  players.forEach((player) => {
+    if (!byTeam.has(player.team)) byTeam.set(player.team, []);
+    byTeam.get(player.team).push(player);
+  });
+  byTeam.forEach((teamPlayers) => {
+    const used = new Set(teamPlayers
+      .map((player) => Number(player.jerseyNumber))
+      .filter((number) => Number.isInteger(number) && number >= 0 && number <= 99));
+    teamPlayers.forEach((player) => {
+      if (Number.isInteger(player.jerseyNumber)) return;
+      const preferred = preferredJerseyNumbersForPosition(player.position);
+      const number = preferred.find((candidate) => !used.has(candidate))
+        ?? Array.from({ length: 100 }, (_, index) => index).find((candidate) => !used.has(candidate));
+      if (Number.isInteger(number)) {
+        used.add(number);
+        player.jerseyNumber = number;
+      }
+    });
+  });
+  return players;
+}
+
 async function applyMaddenNamesToCurrentTeam() {
   if (!playerTable) return;
   const team = importTargetTeam() || playerTable.teams[Number(els.teamSelect.value || 0)] || playerTable.teams[0];
@@ -2700,8 +2756,9 @@ async function applyMaddenNamesToCurrentTeam() {
       updateWork(`${team.name}: loading ${player.name}`, completed, total);
     });
     applyMaddenAssignments(assignments);
+    if (!applyPendingRosterChanges()) return;
     renderPlayers();
-    els.maddenStatus.textContent = `Synced ${assignments.length} ${team.name} roster slot(s) with formatted names and converted ratings. Loaded detailed ratings for ${detailed}; remaining conversions used bulk-rating fallbacks. Review, then Apply All Changes.`;
+    els.maddenStatus.textContent = `Synced and applied ${assignments.length} ${team.name} roster slot(s) with formatted names, jersey numbers, and converted ratings. Loaded detailed ratings for ${detailed}; remaining conversions used bulk-rating fallbacks.`;
   }, assignments.length);
 }
 
@@ -2723,9 +2780,10 @@ async function applyMaddenToAllTeams() {
       updateWork(`${tecmoTeam}: loading ${player.name}`, completed, total);
     });
     applyMaddenAssignments(allAssignments);
+    if (!applyPendingRosterChanges()) return;
     renderPlayers();
     const unchanged = playerTable.count - allAssignments.length;
-    els.maddenStatus.textContent = `Synced ${allAssignments.length} roster slots across ${playerTable.teams.length - missing.length} teams with converted external ratings; ${unchanged} slot(s) stayed unchanged because the player data has fewer than 30 unique rated players. Loaded detailed ratings for ${detailed}.${missing.length ? ` Missing external teams: ${missing.join(", ")}.` : ""} Review, then Apply All Changes.`;
+    els.maddenStatus.textContent = `Synced and applied ${allAssignments.length} roster slots across ${playerTable.teams.length - missing.length} teams with jersey numbers and converted external ratings; ${unchanged} slot(s) stayed unchanged because the player data has fewer than 30 unique rated players. Loaded detailed ratings for ${detailed}.${missing.length ? ` Missing external teams: ${missing.join(", ")}.` : ""}`;
   }, allAssignments.length);
 }
 
@@ -3342,6 +3400,11 @@ function scanAscii() {
   }).join("") || "<tr><td colspan=\"3\">No printable runs found.</td></tr>";
 }
 
+function exportGameYear() {
+  const value = document.querySelector('[data-year-hack="game_year"]')?.value || "";
+  return /^\d{4}$/.test(value) ? value : "";
+}
+
 async function exportRom() {
   return withWork("Exporting ROM", "Committing pending changes...", async () => {
     if (pendingNameEdits.size || pendingNumberEdits.size) {
@@ -3376,7 +3439,8 @@ async function exportRom() {
     const blob = new Blob([rom], { type: "application/octet-stream" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `tsb_${timestampForFilename()}.nes`;
+    const year = exportGameYear();
+    a.download = `tsb_${year ? `${year}_` : ""}${timestampForFilename()}.nes`;
     a.click();
     URL.revokeObjectURL(a.href);
     els.setStatus.textContent = `Exported ${a.download}`;
