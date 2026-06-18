@@ -41,6 +41,8 @@ const els = {
   teamSelect: document.querySelector("#team-select"),
   updateRosters: document.querySelector("#update-rosters"),
   redraftRosters: document.querySelector("#redraft-rosters"),
+  draftSeed: document.querySelector("#draft-seed"),
+  randomDraftSeed: document.querySelector("#random-draft-seed"),
   identityTeamSelect: document.querySelector("#identity-team-select"),
   teamIdentityHeading: document.querySelector("#team-identity-heading"),
   teamIdentityStatus: document.querySelector("#team-identity-status"),
@@ -466,6 +468,63 @@ function parseRom(bytes) {
   };
 }
 
+function hasInesHeader(bytes = rom) {
+  return Boolean(bytes?.length >= 16 && bytes[0] === 0x4E && bytes[1] === 0x45 && bytes[2] === 0x53 && bytes[3] === 0x1A);
+}
+
+function hasPlausibleTsbHeader() {
+  return Boolean(hasInesHeader(rom) && meta && meta.mapper === 4 && !meta.hasTrainer && meta.prgBanks >= 16 && meta.chrBanks >= 16 && meta.endOffset <= rom.length);
+}
+
+function playerTableLooksLikeTsb(table = playerTable) {
+  return Boolean(table?.format === "tsb-pointer"
+    && table.count === 28 * 30
+    && table.teams?.length === 28
+    && table.teams.every((team) => team.slots === 30));
+}
+
+function teamStringTableLooksPlausible(table = teamStringTable) {
+  return Boolean(table
+    && table.teamCount === 28
+    && table.count >= 92
+    && table.start >= 0
+    && table.dataStart > table.start
+    && table.dataEnd >= table.dataStart
+    && table.limit >= table.dataEnd
+    && table.limit <= rom.length);
+}
+
+function supportedTsbRomStatus() {
+  if (!rom || !meta) return { ok: false, message: "Load a Tecmo Super Bowl ROM before applying TSB-specific hacks." };
+  if (!hasInesHeader(rom)) return { ok: false, message: "This ROM does not appear to be an iNES NES ROM. TSB hacks are disabled." };
+  if (meta.mapper !== 4) return { ok: false, message: "This ROM does not use MMC3 / mapper 4. TSB hacks are disabled." };
+  if (meta.hasTrainer) return { ok: false, message: "This ROM has an iNES trainer. TSB hacks are disabled." };
+  if (meta.prgBanks < 16 || meta.chrBanks < 16 || meta.endOffset > rom.length) {
+    return { ok: false, message: "This ROM does not have a plausible Tecmo Super Bowl PRG/CHR layout. TSB hacks are disabled." };
+  }
+  if (!playerTableLooksLikeTsb()) {
+    return { ok: false, message: "This ROM does not appear to contain the supported 28-team Tecmo Super Bowl roster table. TSB hacks are disabled." };
+  }
+  if (!teamStringTableLooksPlausible()) {
+    return { ok: false, message: "This ROM does not appear to contain the supported Tecmo Super Bowl team string table. TSB hacks are disabled." };
+  }
+  return { ok: true, message: "" };
+}
+
+function looksLikeTsbRom() {
+  return supportedTsbRomStatus().ok;
+}
+
+function supportedTsbWarningHtml() {
+  const status = supportedTsbRomStatus();
+  return rom && !status.ok ? `<p class="warning">${escapeHtml(status.message)}</p>` : "";
+}
+
+function requireSupportedTsbForPatches() {
+  const status = supportedTsbRomStatus();
+  if (!status.ok) throw new Error(status.message);
+}
+
 function setLoadedRom(bytes, name) {
   rom = new Uint8Array(bytes);
   document.body.classList.remove("no-rom");
@@ -507,9 +566,10 @@ function enableControls(enabled) {
   ].filter(Boolean).forEach((el) => {
     el.disabled = !enabled || (el === els.pasteTile && !copiedTile);
   });
+  const supportedTsb = looksLikeTsbRom();
   els.previewSet.disabled = !enabled || !els.setInput.value.trim();
-  els.applySet.disabled = !enabled || !els.setInput.value.trim();
-  els.applyHack.disabled = !enabled || !selectedPatch;
+  els.applySet.disabled = !enabled || !els.setInput.value.trim() || !supportedTsb;
+  els.applyHack.disabled = !enabled || !selectedPatch || !supportedTsb;
   els.copySet.disabled = !selectedPatch;
   els.teamSelect.disabled = !enabled || !playerTable;
   els.identityTeamSelect.disabled = !enabled || !teamStringTable;
@@ -520,6 +580,7 @@ function enableControls(enabled) {
   els.applyPlayerNames.disabled = !enabled || (!pendingNameEdits.size && !pendingNumberEdits.size);
   els.updateRosters.disabled = !enabled || playerTable?.format !== "tsb-pointer";
   els.redraftRosters.disabled = !enabled || !supportedDraftLoaded();
+  els.randomDraftSeed.disabled = !enabled || !supportedDraftLoaded();
   els.downloadChangelog.disabled = !enabled || !els.changelogOutput.value.trim();
 }
 
@@ -748,7 +809,7 @@ function detectPlayerNameTable() {
   const tsbCount = 28 * 30;
   const tsbEndPointer = tsbPointerStart + tsbCount * 2;
   const pointerToFileOffset = (pointer) => pointer - 0x8000 + 0x10;
-  if (looksLikeTsbRom() && tsbEndPointer + 1 < rom.length) {
+  if (hasPlausibleTsbHeader() && tsbEndPointer + 1 < rom.length) {
     let validRecords = 0;
     let previousOffset = -1;
     for (let i = 0; i < tsbCount; i += 1) {
@@ -757,10 +818,14 @@ function detectPlayerNameTable() {
       const nextPointer = rom[pointerOffset + 2] | (rom[pointerOffset + 3] << 8);
       const start = pointerToFileOffset(pointer);
       const end = pointerToFileOffset(nextPointer);
+      if (start <= previousOffset || start < 0 || end <= start || end > rom.length) {
+        previousOffset = start;
+        continue;
+      }
       const nameBytes = rom.slice(start + 1, end);
       const printableName = nameBytes.length > 0 && nameBytes.length <= 16
         && Array.from(nameBytes).every((byte) => byte === 0x20 || byte === 0x2E || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A));
-      if (start > previousOffset && end > start && printableName) validRecords += 1;
+      if (printableName) validRecords += 1;
       previousOffset = start;
     }
 
@@ -845,7 +910,7 @@ function detectPlayerAttributeTable() {
 }
 
 function detectTeamStringTable() {
-  if (!rom || !looksLikeTsbRom()) return null;
+  if (!rom || !hasPlausibleTsbHeader()) return null;
   const start = 0x1FC10;
   const count = 119;
   const pointerAdjustment = 0xBC00;
@@ -1561,10 +1626,36 @@ function draftRatingFromAttributes(attrs, roleLabel = "") {
   return Math.round((average * positionFactor) + starterBonus);
 }
 
+function hashSeed(seedText) {
+  const text = String(seedText || "");
+  let hash = 0x811C9DC5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function createSeededRandom(seedText) {
+  let state = hashSeed(seedText) || 0xA5A5A5A5;
+  // Mulberry32 is tiny, deterministic, and good enough for reproducible draft order/scoring jitter.
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomInt(rng, max) {
+  return Math.floor(rng() * max);
+}
+
 function shuffledIndexes(count, random) {
   const values = Array.from({ length: count }, (_, index) => index);
   for (let index = values.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
+    const swapIndex = randomInt(random, index + 1);
     [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
   }
   return values;
@@ -1657,21 +1748,43 @@ function supportedDraftLoaded() {
   return Boolean(playerTable?.format === "tsb-pointer" && playerAttributeTable?.supported);
 }
 
-function createDraftState(mode = "manual") {
+function createRandomDraftSeed() {
+  const bytes = new Uint32Array(2);
+  if (window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    bytes[0] = Math.floor(Math.random() * 0xFFFFFFFF);
+    bytes[1] = Date.now() & 0xFFFFFFFF;
+  }
+  return `TSB-${bytes[0].toString(36).toUpperCase()}-${bytes[1].toString(36).toUpperCase()}`;
+}
+
+function currentDraftSeed() {
+  let seed = els.draftSeed.value.trim();
+  if (!seed) {
+    seed = createRandomDraftSeed();
+    els.draftSeed.value = seed;
+  }
+  return seed;
+}
+
+function createDraftState(mode = "manual", seedText = currentDraftSeed()) {
   if (!playerTable || playerTable.format !== "tsb-pointer" || !playerAttributeTable?.supported) {
     els.maddenStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM first. Re-draft uses native TSB names, jerseys, and attributes.";
     return null;
   }
   const teamCount = playerTable.teams.length;
   const slotsPerTeam = playerTable.teams[0].slots;
+  const random = createSeededRandom(seedText);
   return {
     active: true,
     started: false,
     complete: false,
     mode,
+    seed: seedText,
     userTeamIndex: 0,
-    random: Math.random,
-    order: shuffledIndexes(teamCount, Math.random),
+    random,
+    order: shuffledIndexes(teamCount, random),
     pickIndex: 0,
     teamCount,
     slotsPerTeam,
@@ -1742,13 +1855,14 @@ function stopAutomaticDraft() {
 async function redraftRostersAutomatically() {
   if (!supportedDraftLoaded()) return;
   return withWork("Re-Drafting Rosters", "Running automatic draft...", async () => {
-    draftState = createDraftState("automatic");
+    const seed = currentDraftSeed();
+    draftState = createDraftState("automatic", seed);
     if (!draftState) return;
     draftState.started = true;
-    updateRosterProgress("Re-drafting rosters...", 0, draftState.totalPicks);
+    updateRosterProgress(`Re-drafting rosters with seed ${seed}...`, 0, draftState.totalPicks);
     while (!draftState.complete) {
       autoDraftOnePick(false);
-      updateRosterProgress(`Re-drafting rosters... ${draftState.pickIndex} of ${draftState.totalPicks} picks complete.`, draftState.pickIndex, draftState.totalPicks);
+      updateRosterProgress(`Re-drafting rosters with seed ${seed}... ${draftState.pickIndex} of ${draftState.totalPicks} picks complete.`, draftState.pickIndex, draftState.totalPicks);
       updateWork(`Drafted ${draftState.pickIndex} of ${draftState.totalPicks} players...`, draftState.pickIndex, draftState.totalPicks);
       if (draftState.pickIndex % 30 === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
     }
@@ -1766,7 +1880,7 @@ async function redraftRostersAutomatically() {
       });
     });
     renderPlayers();
-    finishRosterProgress(`Re-draft staged ${changed} roster slot(s). Review the roster, then Finalize Roster.`);
+    finishRosterProgress(`Re-draft staged ${changed} roster slot(s) with seed ${seed}. Review the roster, then Finalize Roster.`);
     updateWork("Re-draft staged.", draftState.totalPicks, draftState.totalPicks);
   }, playerTable.count);
 }
@@ -2527,10 +2641,6 @@ async function updateRostersFromExternalData() {
   await applyMaddenToAllTeams();
 }
 
-function looksLikeTsbRom() {
-  return Boolean(meta && meta.mapper === 4 && meta.prgBanks >= 16 && meta.chrBanks >= 16);
-}
-
 function setLines(sets) {
   return sets.map((set) => `SET(${hex(set.offset)},0x${set.hex.toUpperCase()})`).join("\n");
 }
@@ -2616,7 +2726,8 @@ function renderHackControls() {
 
   const category = els.hackFilter.value || "All";
   const filtered = category === "All" ? hacks : hacks.filter((hack) => hack.category === category);
-  els.hackControls.innerHTML = filtered.map((hack) => {
+  const warning = supportedTsbWarningHtml();
+  els.hackControls.innerHTML = `${warning}${filtered.map((hack) => {
     let control = "";
     if (hack.type === "choice") {
       const options = hack.options.map((option, index) => `<option value="${index}">${escapeHtml(option.label)}</option>`).join("");
@@ -2648,23 +2759,20 @@ function renderHackControls() {
         </div>
       </article>
     `;
-  }).join("");
+  }).join("")}`;
 }
 
 function renderHackDetail() {
   if (!selectedPatch) {
-    els.hackDetail.textContent = "Choose a patch to inspect its offsets before applying.";
+    els.hackDetail.innerHTML = `${supportedTsbWarningHtml()}<p>Choose a patch to inspect its offsets before applying.</p>`;
     enableControls(Boolean(rom));
     return;
   }
 
-  const warning = meta && !looksLikeTsbRom()
-    ? "<p class=\"warning\">Loaded ROM does not look like a typical NES Tecmo Super Bowl ROM. Open your TSB ROM before applying these offsets.</p>"
-    : "";
   els.hackDetail.innerHTML = `
     <h3>${escapeHtml(selectedPatch.title)}</h3>
     <p>${escapeHtml(selectedPatch.description || "")}</p>
-    ${warning}
+    ${supportedTsbWarningHtml()}
     ${renderSetDiff(selectedPatch.sets)}
     <pre>${escapeHtml(setLines(selectedPatch.sets))}</pre>
   `;
@@ -2804,8 +2912,17 @@ function markdownEscape(value) {
 }
 
 function playerPointerToOffsetFromBytes(bytes, pointerOffset) {
+  if (pointerOffset < 0 || pointerOffset + 1 >= bytes.length) return -1;
   const pointer = bytes[pointerOffset] | (bytes[pointerOffset + 1] << 8);
   return pointer - 0x8000 + 0x10;
+}
+
+function rosterSlotsPerTeam() {
+  if (Number.isInteger(playerTable?.slotsPerTeam) && playerTable.slotsPerTeam > 0) return playerTable.slotsPerTeam;
+  const firstTeamSlots = playerTable?.teams?.[0]?.slots;
+  if (Number.isInteger(firstTeamSlots) && firstTeamSlots > 0) return firstTeamSlots;
+  if (playerTable?.teams?.length) return Math.floor(playerTable.count / playerTable.teams.length);
+  return 0;
 }
 
 function playerSlotOffsetFromBytes(bytes, slotIndex) {
@@ -2817,8 +2934,10 @@ function playerSlotOffsetFromBytes(bytes, slotIndex) {
 
 function readPlayerNameFromBytes(bytes, slotIndex) {
   const offset = playerSlotOffsetFromBytes(bytes, slotIndex);
+  if (offset < 0 || offset >= bytes.length) return "";
   if (playerTable.format === "tsb-pointer") {
     const nextOffset = playerPointerToOffsetFromBytes(bytes, playerTable.pointerStart + (slotIndex + 1) * 2);
+    if (nextOffset <= offset || nextOffset > bytes.length) return "";
     const encoded = Array.from(bytes.slice(offset + 1, nextOffset), (byte) => String.fromCharCode(byte)).join("");
     const lastNameStart = encoded.search(/[A-Z]/);
     if (lastNameStart < 0) return encoded;
@@ -2829,7 +2948,8 @@ function readPlayerNameFromBytes(bytes, slotIndex) {
 
 function readPlayerNumberFromBytes(bytes, slotIndex) {
   if (playerTable?.format !== "tsb-pointer") return null;
-  return bytes[playerSlotOffsetFromBytes(bytes, slotIndex)];
+  const offset = playerSlotOffsetFromBytes(bytes, slotIndex);
+  return offset >= 0 && offset < bytes.length ? bytes[offset] : null;
 }
 
 function teamStringOffsetFromBytes(bytes, stringIndex) {
@@ -2877,6 +2997,8 @@ function preferenceLabel(value) {
 
 function rosterMarkdown(beforeBytes, afterBytes) {
   if (!playerTable) return [];
+  const slotsPerTeam = rosterSlotsPerTeam();
+  if (!slotsPerTeam) return [];
   const rows = [];
   for (let slotIndex = 0; slotIndex < playerTable.count; slotIndex += 1) {
     const beforeName = readPlayerNameFromBytes(beforeBytes, slotIndex);
@@ -2884,8 +3006,9 @@ function rosterMarkdown(beforeBytes, afterBytes) {
     const beforeNumber = readPlayerNumberFromBytes(beforeBytes, slotIndex);
     const afterNumber = readPlayerNumberFromBytes(afterBytes, slotIndex);
     if (beforeName === afterName && beforeNumber === afterNumber) continue;
-    const teamIndex = Math.floor(slotIndex / playerTable.slotsPerTeam);
-    const role = TSB_POSITIONS_30[slotIndex % playerTable.slotsPerTeam] || `Slot ${slotIndex + 1}`;
+    const teamIndex = Math.floor(slotIndex / slotsPerTeam);
+    const teamSlot = slotIndex % slotsPerTeam;
+    const role = playerTable.positions?.[teamSlot] || TSB_POSITIONS_30[teamSlot] || `Slot ${teamSlot + 1}`;
     const team = playerTable.teams[teamIndex]?.name || teamLabelForMarkdown(afterBytes, teamIndex);
     const jersey = beforeNumber === afterNumber
       ? tsbNumberByteToJersey(afterNumber)
@@ -2896,7 +3019,7 @@ function rosterMarkdown(beforeBytes, afterBytes) {
 }
 
 function teamNameMarkdown(beforeBytes, afterBytes) {
-  if (!teamStringTable) return [];
+  if (!teamStringTableLooksPlausible()) return [];
   const rows = [];
   for (let teamIndex = 0; teamIndex < teamStringTable.teamCount; teamIndex += 1) {
     const before = teamIdentityFromBytes(beforeBytes, teamIndex);
@@ -2943,14 +3066,23 @@ function teamAiMarkdown(beforeBytes, afterBytes) {
 function colorOffsetLabels() {
   const labels = new Map();
   TSB_TEAM_NAMES_28.forEach((team, index) => labels.set(TEAM_COLOR_BASE + index, `${team} team data screen color`));
-  [...SHARED_TEAM_COLOR_OFFSETS, ...MENU_COLOR_OFFSETS, ...PRO_BOWL_COLOR_OFFSETS].forEach((item) => labels.set(item.offset, item.label));
+  [
+    SHARED_TEAM_COLOR_OFFSETS,
+    MENU_COLOR_OFFSETS,
+    typeof PRO_BOWL_COLOR_OFFSETS !== "undefined" ? PRO_BOWL_COLOR_OFFSETS : [],
+  ].flat().forEach((item) => {
+    if (Number.isInteger(item?.offset)) labels.set(item.offset, item.label || hex(item.offset));
+  });
   return labels;
 }
 
 function colorMarkdown(beforeBytes, afterBytes) {
   const rows = [];
-  colorOffsetLabels().forEach((label, offset) => {
+  const labels = colorOffsetLabels();
+  const offsets = new Set([...labels.keys(), ...pendingColorEdits.keys()]);
+  offsets.forEach((offset) => {
     if (offset < 0 || offset >= beforeBytes.length || beforeBytes[offset] === afterBytes[offset]) return;
+    const label = labels.get(offset) || `Color byte ${hex(offset)}`;
     rows.push(`| ${markdownEscape(label)} | ${hex(offset)} | ${byteHex(beforeBytes[offset])} | ${byteHex(afterBytes[offset])} |`);
   });
   return rows.length ? ["## Color Changes", "", "| Item | Offset | Before | After |", "| --- | --- | --- | --- |", ...rows] : [];
@@ -3206,6 +3338,7 @@ els.hackControls.addEventListener("click", (event) => {
 els.applyHack.addEventListener("click", () => {
   if (!selectedPatch) return;
   try {
+    requireSupportedTsbForPatches();
     const written = applySets(selectedPatch.sets);
     els.setStatus.textContent = `Applied ${written} byte(s).`;
   } catch (error) {
@@ -3307,6 +3440,7 @@ els.setInput.addEventListener("input", () => {
 els.previewSet.addEventListener("click", previewPastedSet);
 els.applySet.addEventListener("click", () => {
   try {
+    requireSupportedTsbForPatches();
     const sets = parseSetCommands(els.setInput.value);
     const written = applySets(sets);
     els.setStatus.textContent = `Applied ${written} byte(s).`;
@@ -3316,6 +3450,10 @@ els.applySet.addEventListener("click", () => {
 });
 els.teamSelect.addEventListener("change", () => selectTecmoTeam(els.teamSelect.value));
 els.updateRosters.addEventListener("click", updateRostersFromExternalData);
+els.randomDraftSeed.addEventListener("click", () => {
+  els.draftSeed.value = createRandomDraftSeed();
+  els.maddenStatus.textContent = `Draft seed set to ${els.draftSeed.value}.`;
+});
 els.redraftRosters.addEventListener("click", redraftRostersAutomatically);
 els.identityTeamSelect.addEventListener("change", renderTeams);
 els.teamIdentityEditor.addEventListener("input", (event) => {
