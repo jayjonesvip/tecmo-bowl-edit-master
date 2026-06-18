@@ -89,6 +89,8 @@ let teamStringTable = null;
 let selectedPlayerSlot = 0;
 let pendingNameEdits = new Map();
 let pendingNumberEdits = new Map();
+let pendingPlayerAttributes = new Map();
+let pendingPlayerFaces = new Map();
 let pendingTeamEdits = new Map();
 let pendingTeamAiEdits = new Map();
 let pendingColorEdits = new Map();
@@ -537,6 +539,8 @@ function setLoadedRom(bytes, name) {
   copiedTile = null;
   pendingNameEdits = new Map();
   pendingNumberEdits = new Map();
+  pendingPlayerAttributes = new Map();
+  pendingPlayerFaces = new Map();
   pendingTeamEdits = new Map();
   pendingTeamAiEdits = new Map();
   pendingColorEdits = new Map();
@@ -577,7 +581,7 @@ function enableControls(enabled) {
   els.applyTeamChanges.disabled = !enabled || (!pendingTeamEdits.size && !pendingTeamAiEdits.size);
   els.colorTeamSelect.disabled = !enabled || !looksLikeTsbRom();
   els.applyColorChanges.disabled = !enabled || !pendingColorEdits.size;
-  els.applyPlayerNames.disabled = !enabled || (!pendingNameEdits.size && !pendingNumberEdits.size);
+  els.applyPlayerNames.disabled = !enabled || !hasPendingRosterChanges();
   els.updateRosters.disabled = !enabled || playerTable?.format !== "tsb-pointer";
   els.redraftRosters.disabled = !enabled || !supportedDraftLoaded();
   els.randomDraftSeed.disabled = !enabled || !supportedDraftLoaded();
@@ -1524,6 +1528,11 @@ function faceOffsetForSlot(slotIndex) {
 }
 
 function readPlayerFace(slotIndex) {
+  if (pendingPlayerFaces.has(slotIndex)) return pendingPlayerFaces.get(slotIndex);
+  return readStoredPlayerFace(slotIndex);
+}
+
+function readStoredPlayerFace(slotIndex) {
   const offset = faceOffsetForSlot(slotIndex);
   if (offset === null || offset >= rom.length) return null;
   return rom[offset];
@@ -1548,19 +1557,24 @@ function facePreviewHtml(faceId, className = "") {
 function writePlayerFace(slotIndex, faceId) {
   const offset = faceOffsetForSlot(slotIndex);
   if (offset === null || offset >= rom.length || !TSB_FACE_ID_SET.has(faceId)) return false;
-  rom[offset] = faceId;
-  dirty = true;
-  updateDirty();
+  if (faceId === readStoredPlayerFace(slotIndex)) pendingPlayerFaces.delete(slotIndex);
+  else pendingPlayerFaces.set(slotIndex, faceId);
   return true;
 }
 
 function readPlayerAttributes(slotIndex) {
+  const attrs = readStoredPlayerAttributes(slotIndex);
+  if (!attrs) return null;
+  if (pendingPlayerAttributes.has(slotIndex)) return { ...attrs, values: pendingPlayerAttributes.get(slotIndex).slice() };
+  return attrs;
+}
+
+function readStoredPlayerAttributes(slotIndex) {
   const base = attributeOffsetForSlot(slotIndex);
   if (base === null || base + 4 >= rom.length) return null;
 
-  const teamSlot = slotIndex % playerAttributeTable.slotsPerTeam;
-  const roleKey = attributeRoleKey(slotRoleForTeamSlot(teamSlot).label);
-  const labels = ATTRIBUTE_LABELS_BY_ROLE[roleKey] || ATTRIBUTE_LABELS_BY_ROLE.DEF;
+  const labels = playerAttributeLabels(slotIndex);
+  const roleKey = attributeRoleKey(slotRoleForTeamSlot(slotIndex % playerAttributeTable.slotsPerTeam).label);
   const b1 = rom[base];
   const b2 = rom[base + 1];
   const b3 = rom[base + 3];
@@ -1587,33 +1601,31 @@ function readPlayerAttributes(slotIndex) {
   };
 }
 
+function playerAttributeLabels(slotIndex) {
+  const teamSlot = slotIndex % playerAttributeTable.slotsPerTeam;
+  const roleKey = attributeRoleKey(slotRoleForTeamSlot(teamSlot).label);
+  return ATTRIBUTE_LABELS_BY_ROLE[roleKey] || ATTRIBUTE_LABELS_BY_ROLE.DEF;
+}
+
 function writePlayerAttribute(slotIndex, attributeIndex, nibbleValue) {
-  const base = attributeOffsetForSlot(slotIndex);
-  if (base === null || base + 4 >= rom.length) return false;
-
-  const nibble = nibbleValue & 0x0F;
-  if (attributeIndex === 0) rom[base] = (rom[base] & 0xF0) | nibble;
-  else if (attributeIndex === 1) rom[base] = (rom[base] & 0x0F) | (nibble << 4);
-  else if (attributeIndex === 2) rom[base + 1] = (rom[base + 1] & 0x0F) | (nibble << 4);
-  else if (attributeIndex === 3) rom[base + 1] = (rom[base + 1] & 0xF0) | nibble;
-  else if (attributeIndex === 4) rom[base + 3] = (rom[base + 3] & 0x0F) | (nibble << 4);
-  else if (attributeIndex === 5) rom[base + 3] = (rom[base + 3] & 0xF0) | nibble;
-  else if (attributeIndex === 6) rom[base + 4] = (rom[base + 4] & 0x0F) | (nibble << 4);
-  else if (attributeIndex === 7) rom[base + 4] = (rom[base + 4] & 0xF0) | nibble;
-  else return false;
-
-  dirty = true;
-  updateDirty();
-  return true;
+  const current = readPlayerAttributes(slotIndex);
+  if (!current || attributeIndex < 0 || attributeIndex >= current.values.length) return false;
+  const values = current.values.slice();
+  values[attributeIndex] = nibbleValue & 0x0F;
+  return writePlayerAttributeValues(slotIndex, values);
 }
 
 function writePlayerAttributeValues(slotIndex, values) {
-  const current = readPlayerAttributes(slotIndex);
-  if (!current) return;
+  const current = readStoredPlayerAttributes(slotIndex);
+  if (!current) return false;
   const count = Math.min(current.values.length, values.length);
+  const staged = current.values.slice();
   for (let index = 0; index < count; index += 1) {
-    writePlayerAttribute(slotIndex, index, values[index]);
+    staged[index] = Number(values[index]) & 0x0F;
   }
+  if (staged.every((value, index) => value === current.values[index])) pendingPlayerAttributes.delete(slotIndex);
+  else pendingPlayerAttributes.set(slotIndex, staged);
+  return true;
 }
 
 function draftRatingFromAttributes(attrs, roleLabel = "") {
@@ -2060,15 +2072,74 @@ function pendingNameSets() {
   }));
 }
 
+function writeAttributeValuesToBytes(target, slotIndex, values) {
+  const base = attributeOffsetForSlot(slotIndex);
+  if (base === null || base + 4 >= target.length) throw new Error(`Player ${slotIndex + 1} attributes are outside the ROM.`);
+  const staged = values.map((value) => Number(value) & 0x0F);
+  if (staged.length > 0) target[base] = (target[base] & 0xF0) | staged[0];
+  if (staged.length > 1) target[base] = (target[base] & 0x0F) | (staged[1] << 4);
+  if (staged.length > 2) target[base + 1] = (target[base + 1] & 0x0F) | (staged[2] << 4);
+  if (staged.length > 3) target[base + 1] = (target[base + 1] & 0xF0) | staged[3];
+  if (staged.length > 4) target[base + 3] = (target[base + 3] & 0x0F) | (staged[4] << 4);
+  if (staged.length > 5) target[base + 3] = (target[base + 3] & 0xF0) | staged[5];
+  if (staged.length > 6) target[base + 4] = (target[base + 4] & 0x0F) | (staged[6] << 4);
+  if (staged.length > 7) target[base + 4] = (target[base + 4] & 0xF0) | staged[7];
+}
+
+function writePlayerFaceToBytes(target, slotIndex, faceId) {
+  const offset = faceOffsetForSlot(slotIndex);
+  if (offset === null || offset >= target.length || !TSB_FACE_ID_SET.has(faceId)) throw new Error(`Player ${slotIndex + 1} face is outside the supported face table.`);
+  target[offset] = faceId;
+}
+
+function writePendingPlayerAttributesToBytes(target) {
+  pendingPlayerAttributes.forEach((values, slotIndex) => writeAttributeValuesToBytes(target, slotIndex, values));
+  pendingPlayerFaces.forEach((faceId, slotIndex) => writePlayerFaceToBytes(target, slotIndex, faceId));
+}
+
+function pendingPlayerAttributeSets() {
+  if (!playerAttributeTable?.supported) return [];
+  const slots = new Set([...pendingPlayerAttributes.keys(), ...pendingPlayerFaces.keys()]);
+  return Array.from(slots).sort((a, b) => a - b).map((slotIndex) => {
+    const base = attributeOffsetForSlot(slotIndex);
+    if (base === null || base + 4 >= rom.length) return null;
+    const bytes = Array.from(rom.slice(base, base + 5));
+    if (pendingPlayerAttributes.has(slotIndex)) {
+      const values = pendingPlayerAttributes.get(slotIndex);
+      if (values.length > 0) bytes[0] = (bytes[0] & 0xF0) | (values[0] & 0x0F);
+      if (values.length > 1) bytes[0] = (bytes[0] & 0x0F) | ((values[1] & 0x0F) << 4);
+      if (values.length > 2) bytes[1] = (bytes[1] & 0x0F) | ((values[2] & 0x0F) << 4);
+      if (values.length > 3) bytes[1] = (bytes[1] & 0xF0) | (values[3] & 0x0F);
+      if (values.length > 4) bytes[3] = (bytes[3] & 0x0F) | ((values[4] & 0x0F) << 4);
+      if (values.length > 5) bytes[3] = (bytes[3] & 0xF0) | (values[5] & 0x0F);
+      if (values.length > 6) bytes[4] = (bytes[4] & 0x0F) | ((values[6] & 0x0F) << 4);
+      if (values.length > 7) bytes[4] = (bytes[4] & 0xF0) | (values[7] & 0x0F);
+    }
+    if (pendingPlayerFaces.has(slotIndex)) bytes[2] = pendingPlayerFaces.get(slotIndex);
+    return { offset: base, hex: bytes.map(byteHex).join("") };
+  }).filter(Boolean);
+}
+
+function hasPendingRosterChanges() {
+  return Boolean(pendingNameEdits.size || pendingNumberEdits.size || pendingPlayerAttributes.size || pendingPlayerFaces.size);
+}
+
+function clearPendingRosterChanges() {
+  pendingNameEdits.clear();
+  pendingNumberEdits.clear();
+  pendingPlayerAttributes.clear();
+  pendingPlayerFaces.clear();
+}
+
 function renderPlayerDiff() {
-  const sets = pendingNameSets();
+  const sets = [...pendingNameSets(), ...pendingPlayerAttributeSets()];
   if (!sets.length) {
     els.playerDiff.textContent = "Edit a name to preview its bytes.";
     enableControls(Boolean(rom));
     return;
   }
   const formatNote = playerTable.format === "tsb-pointer"
-    ? "TSB names and jersey numbers are compact variable-length records. Applying changes rebuilds the roster block and updates every player pointer."
+    ? "Roster names, jersey numbers, attributes, and faces stay staged until Finalize Roster. TSB names are compact variable-length records, so finalizing name changes rebuilds the roster block and updates every player pointer."
     : "Names are stored as fixed 16-byte uppercase slots. Periods are encoded as [ in this ROM.";
   els.playerDiff.innerHTML = `
     <h3>${sets.length} pending roster change${sets.length === 1 ? "" : "s"}</h3>
@@ -2080,14 +2151,24 @@ function renderPlayerDiff() {
 
 function applyPlayerNameEdits() {
   const sets = pendingNameSets();
-  if (!sets.length) {
+  const attributeSets = pendingPlayerAttributeSets();
+  if (!hasPendingRosterChanges()) {
     els.maddenStatus.textContent = dirty ? "All current changes are already applied to the working ROM. Export ROM when ready." : "No changes to apply.";
     return;
   }
   try {
-    const written = playerTable.format === "tsb-pointer" ? rebuildTsbNameBlock() : applySets(sets);
-    pendingNameEdits.clear();
-    pendingNumberEdits.clear();
+    const validation = new Uint8Array(rom);
+    writePendingPlayerNamesToBytes(validation);
+    writePendingPlayerAttributesToBytes(validation);
+    let written = 0;
+    if (sets.length) written += playerTable.format === "tsb-pointer" ? rebuildTsbNameBlock() : applySets(sets);
+    written += attributeSets.reduce((sum, set) => sum + set.hex.length / 2, 0);
+    writePendingPlayerAttributesToBytes(rom);
+    if (attributeSets.length) {
+      dirty = true;
+      updateDirty();
+    }
+    clearPendingRosterChanges();
     renderPlayers();
     els.maddenStatus.textContent = `Applied ${written} roster byte(s).`;
   } catch (error) {
@@ -2096,9 +2177,9 @@ function applyPlayerNameEdits() {
 }
 
 function applyPendingRosterChanges() {
-  const before = pendingNameEdits.size + pendingNumberEdits.size;
+  const before = hasPendingRosterChanges();
   applyPlayerNameEdits();
-  return before === 0 || pendingNameEdits.size + pendingNumberEdits.size === 0;
+  return !before || !hasPendingRosterChanges();
 }
 
 function rebuildTsbNameBlock() {
@@ -2880,6 +2961,7 @@ function romSnapshotWithPendingChanges() {
   if (!rom) throw new Error("Load a ROM first.");
   const snapshot = new Uint8Array(rom);
   writePendingPlayerNamesToBytes(snapshot);
+  writePendingPlayerAttributesToBytes(snapshot);
   writePendingTeamStringsToBytes(snapshot);
   applySetsToBytes(snapshot, teamAiSetDiffs());
   applySetsToBytes(snapshot, colorSetDiffs());
@@ -3018,6 +3100,44 @@ function rosterMarkdown(beforeBytes, afterBytes) {
   return rows.length ? ["## Roster Changes", "", "| Team | Slot | Name | Jersey |", "| --- | --- | --- | --- |", ...rows] : [];
 }
 
+function playerAttributesFromBytes(bytes, slotIndex) {
+  const base = attributeOffsetForSlot(slotIndex);
+  if (base === null || base + 4 >= bytes.length) return null;
+  const labels = playerAttributeLabels(slotIndex);
+  const b1 = bytes[base];
+  const b2 = bytes[base + 1];
+  const b3 = bytes[base + 3];
+  const b4 = bytes[base + 4];
+  const values = [b1 & 0x0F, (b1 >> 4) & 0x0F, (b2 >> 4) & 0x0F, b2 & 0x0F];
+  if (labels.length >= 6) values.push((b3 >> 4) & 0x0F, b3 & 0x0F);
+  if (labels.length >= 8) values.push((b4 >> 4) & 0x0F, b4 & 0x0F);
+  return { base, labels, values, faceId: bytes[base + 2] };
+}
+
+function playerAttributeMarkdown(beforeBytes, afterBytes) {
+  if (!playerAttributeTable?.supported || !playerTable) return [];
+  const rows = [];
+  const slotsPerTeam = rosterSlotsPerTeam();
+  if (!slotsPerTeam) return [];
+  for (let slotIndex = 0; slotIndex < playerTable.count; slotIndex += 1) {
+    const before = playerAttributesFromBytes(beforeBytes, slotIndex);
+    const after = playerAttributesFromBytes(afterBytes, slotIndex);
+    if (!before || !after) continue;
+    const teamIndex = Math.floor(slotIndex / slotsPerTeam);
+    const teamSlot = slotIndex % slotsPerTeam;
+    const team = playerTable.teams[teamIndex]?.name || teamLabelForMarkdown(afterBytes, teamIndex);
+    const role = playerTable.positions?.[teamSlot] || TSB_POSITIONS_30[teamSlot] || `Slot ${teamSlot + 1}`;
+    before.labels.forEach((label, index) => {
+      if (before.values[index] === after.values[index]) return;
+      rows.push(`| ${markdownEscape(team)} | ${markdownEscape(role)} | ${markdownEscape(label)} | ${TSB_ATTRIBUTE_VALUE_STEPS[before.values[index]] || 0} | ${TSB_ATTRIBUTE_VALUE_STEPS[after.values[index]] || 0} | ${hex(after.base)} |`);
+    });
+    if (before.faceId !== after.faceId) {
+      rows.push(`| ${markdownEscape(team)} | ${markdownEscape(role)} | Face | ${byteHex(before.faceId)} | ${byteHex(after.faceId)} | ${hex(after.base + 2)} |`);
+    }
+  }
+  return rows.length ? ["## Player Attribute Changes", "", "| Team | Slot | Attribute | Before | After | Offset |", "| --- | --- | --- | ---: | ---: | --- |", ...rows] : [];
+}
+
 function teamNameMarkdown(beforeBytes, afterBytes) {
   if (!teamStringTableLooksPlausible()) return [];
   const rows = [];
@@ -3121,19 +3241,20 @@ function buildChangeLogMarkdown() {
     `- Generated: ${new Date().toLocaleString()}`,
     `- Changed byte ranges: ${ranges.length}`,
     `- Changed bytes: ${changedBytes}`,
-    `- Includes staged edits: ${pendingNameEdits.size || pendingNumberEdits.size || pendingTeamEdits.size || pendingTeamAiEdits.size || pendingColorEdits.size ? "yes" : "no"}`,
+    `- Includes staged edits: ${hasPendingRosterChanges() || pendingTeamEdits.size || pendingTeamAiEdits.size || pendingColorEdits.size ? "yes" : "no"}`,
     "",
   ];
 
   const humanSections = [
     rosterMarkdown(originalRom, snapshot),
+    playerAttributeMarkdown(originalRom, snapshot),
     teamNameMarkdown(originalRom, snapshot),
     teamAiMarkdown(originalRom, snapshot),
     colorMarkdown(originalRom, snapshot),
   ];
   const hasHumanSections = humanSections.some((section) => section.length);
   if (!hasHumanSections && ranges.length) {
-    lines.push("## Human-Readable Changes", "", "No mapped roster, team, AI, playbook, or color changes were detected. See the byte audit for raw ROM edits.", "");
+    lines.push("## Human-Readable Changes", "", "No mapped roster, attribute, team, AI, playbook, or color changes were detected. See the byte audit for raw ROM edits.", "");
   }
   humanSections.forEach((section) => {
     if (section.length) lines.push(...section, "");
@@ -3251,10 +3372,6 @@ function exportGameYear() {
 
 async function exportRom() {
   return withWork("Exporting ROM", "Committing pending changes...", async () => {
-    if (pendingNameEdits.size || pendingNumberEdits.size) {
-      applyPlayerNameEdits();
-      if (pendingNameEdits.size || pendingNumberEdits.size) return;
-    }
     if (pendingTeamEdits.size) {
       try {
         applyTeamStringEdits();
@@ -3278,6 +3395,9 @@ async function exportRom() {
         els.colorStatus.textContent = `Could not export color changes: ${error.message}`;
         return;
       }
+    }
+    if (hasPendingRosterChanges()) {
+      els.maddenStatus.textContent = "Roster changes are still staged. Click Finalize Roster before exporting if you want names, jerseys, attributes, or faces included.";
     }
     updateWork("Creating ROM download...", 2, 3);
     const blob = new Blob([rom], { type: "application/octet-stream" });
@@ -3610,6 +3730,7 @@ els.attributeEditor.addEventListener("change", (event) => {
   const index = Number(input.dataset.attributeIndex);
   const value = Number(input.value);
   if (writePlayerAttribute(selectedPlayerSlot, index, value)) {
+    renderPlayerDiff();
     renderPlayerAttributes();
   }
 });
