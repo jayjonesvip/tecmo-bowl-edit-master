@@ -468,6 +468,7 @@ function parseRom(bytes) {
 
 function setLoadedRom(bytes, name) {
   rom = new Uint8Array(bytes);
+  document.body.classList.remove("no-rom");
   originalRom = new Uint8Array(bytes);
   meta = parseRom(rom);
   romName = name.replace(/\.nes$/i, "") + ".nes";
