@@ -538,6 +538,19 @@ input[type="range"] {
   max-width: 220px;
 }
 
+.seed-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.seed-control input {
+  width: 132px;
+  min-height: 36px;
+}
+
 .byte-input {
   width: 96px;
   min-height: 36px;
