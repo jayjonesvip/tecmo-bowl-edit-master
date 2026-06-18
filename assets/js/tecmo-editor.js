@@ -63,6 +63,7 @@ const els = {
   attributeEditor: document.querySelector("#attribute-editor"),
   applyPlayerNames: document.querySelector("#apply-player-names"),
   maddenStatus: document.querySelector("#madden-status"),
+  rosterProgress: document.querySelector("#roster-progress"),
   workOverlay: document.querySelector("#work-overlay"),
   workTitle: document.querySelector("#work-title"),
   workDetail: document.querySelector("#work-detail"),
@@ -385,6 +386,18 @@ function hideWork() {
   els.workOverlay.hidden = true;
 }
 
+function updateRosterProgress(detail, value, max) {
+  els.maddenStatus.textContent = detail;
+  els.rosterProgress.hidden = false;
+  els.rosterProgress.max = Math.max(1, max);
+  els.rosterProgress.value = Math.max(0, Math.min(value, max));
+}
+
+function finishRosterProgress(detail) {
+  els.maddenStatus.textContent = detail;
+  els.rosterProgress.value = els.rosterProgress.max || 1;
+}
+
 async function withWork(title, detail, task, max = 100) {
   showWork(title, detail, 0, max);
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -458,6 +471,8 @@ function setLoadedRom(bytes, name) {
   pendingTeamAiEdits = new Map();
   pendingColorEdits = new Map();
   els.changelogOutput.value = "";
+  els.rosterProgress.hidden = true;
+  els.rosterProgress.value = 0;
   selectedPlayerSlot = 0;
   draftState = null;
   stopAutomaticDraft();
@@ -1651,9 +1666,12 @@ async function redraftRostersAutomatically() {
     draftState = createDraftState("automatic");
     if (!draftState) return;
     draftState.started = true;
+    updateRosterProgress("Re-drafting rosters...", 0, draftState.totalPicks);
     while (!draftState.complete) {
       autoDraftOnePick(false);
+      updateRosterProgress(`Re-drafting rosters... ${draftState.pickIndex} of ${draftState.totalPicks} picks complete.`, draftState.pickIndex, draftState.totalPicks);
       updateWork(`Drafted ${draftState.pickIndex} of ${draftState.totalPicks} players...`, draftState.pickIndex, draftState.totalPicks);
+      if (draftState.pickIndex % 30 === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
     }
 
     let changed = 0;
@@ -1669,7 +1687,7 @@ async function redraftRostersAutomatically() {
       });
     });
     renderPlayers();
-    els.maddenStatus.textContent = `Re-draft staged ${changed} roster slot(s). Review the roster, then Finalize Roster.`;
+    finishRosterProgress(`Re-draft staged ${changed} roster slot(s). Review the roster, then Finalize Roster.`);
     updateWork("Re-draft staged.", draftState.totalPicks, draftState.totalPicks);
   }, playerTable.count);
 }
@@ -2409,18 +2427,21 @@ async function applyMaddenToAllTeams() {
   });
 
   return withWork("Syncing All Teams", "Preparing all 28 rosters...", async () => {
+    updateRosterProgress("Preparing roster update...", 0, allAssignments.length || 1);
     const detailed = await enrichAssignments(allAssignments, ({ player, tecmoTeam }, completed, total) => {
+      updateRosterProgress(`${tecmoTeam}: loading ${player.name}`, completed, total);
       updateWork(`${tecmoTeam}: loading ${player.name}`, completed, total);
     });
     applyMaddenAssignments(allAssignments);
     renderPlayers();
     const unchanged = playerTable.count - allAssignments.length;
-    els.maddenStatus.textContent = `Staged ${allAssignments.length} roster slots across ${playerTable.teams.length - missing.length} teams with jersey numbers and converted external ratings; ${unchanged} slot(s) stayed unchanged because the player data has fewer than 30 unique rated players. Loaded detailed ratings for ${detailed}.${missing.length ? ` Missing external teams: ${missing.join(", ")}.` : ""} Review the roster, then Finalize Roster.`;
+    finishRosterProgress(`Staged ${allAssignments.length} roster slots across ${playerTable.teams.length - missing.length} teams with jersey numbers and converted external ratings; ${unchanged} slot(s) stayed unchanged because the player data has fewer than 30 unique rated players. Loaded detailed ratings for ${detailed}.${missing.length ? ` Missing external teams: ${missing.join(", ")}.` : ""} Review the roster, then Finalize Roster.`);
   }, allAssignments.length);
 }
 
 async function updateRostersFromExternalData() {
   if (playerTable?.format !== "tsb-pointer") return;
+  updateRosterProgress("Loading external player data...", 0, 1);
   if (!maddenPlayers.length) await importMaddenRatings();
   if (!maddenPlayers.length) return;
   await applyMaddenToAllTeams();

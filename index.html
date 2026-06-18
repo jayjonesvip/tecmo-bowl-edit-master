@@ -69,16 +69,19 @@
           </div>
         </div>
 
-        <div class="human-grid">
-          <section class="human-section">
+        <section class="roster-management">
+          <div>
             <h2>Roster Management</h2>
+            <div id="madden-status" class="muted">Load a 28-team Tecmo Super Bowl ROM to update rosters from external player data or run an automatic re-draft.</div>
+            <progress id="roster-progress" value="0" max="100" hidden></progress>
+          </div>
             <div class="player-actions">
               <button id="update-rosters" type="button" disabled>Update Rosters</button>
               <button id="redraft-rosters" type="button" disabled>Re-Draft</button>
             </div>
-            <div id="madden-status" class="muted">Load a 28-team Tecmo Super Bowl ROM to update rosters from external player data or run an automatic re-draft.</div>
-          </section>
+        </section>
 
+        <div class="human-grid">
           <section class="human-section">
             <h2 id="roster-heading">Roster Slots</h2>
             <div id="player-status" class="muted">Load a ROM to detect editable player names.</div>
