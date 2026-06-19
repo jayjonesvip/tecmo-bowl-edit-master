@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tecmo ROM Workshop</title>
-  <meta name="description" content="Browser-based Tecmo Super Bowl NES ROM editor for roster management, ratings, teams, colors, playbooks, AI tendencies, graphics, and gameplay patches.">
-  <link rel="stylesheet" href="assets/css/tecmo-editor.css">
+  <title>NES Football ROM Editor</title>
+  <meta name="description" content="Browser-based NES football ROM editor for roster management, ratings, teams, colors, playbooks, AI tendencies, graphics, and gameplay patches.">
+  <link rel="stylesheet" href="assets/css/rom-editor.css">
 </head>
 <body class="no-rom">
   <header class="app-header">
     <div>
-      <h1>Tecmo ROM Workshop</h1>
-      <p id="rom-subtitle">Load a NES ROM to manage rosters, teams, colors, graphics, and gameplay patches.</p>
+      <h1>NES Football ROM Editor</h1>
+      <p id="rom-subtitle">Load your legally obtained ROM file. The file is processed locally in your browser and is not uploaded.</p>
     </div>
     <div class="toolbar">
       <button id="load-bundled" type="button" title="Load the bundled ROM" hidden>Load Bundled</button>
-      <label class="file-button" title="Open a NES ROM">
+      <label class="file-button" title="Open a legally obtained NES ROM. The file is processed locally in your browser and is not uploaded.">
         Open ROM
         <input id="rom-file" type="file" accept=".nes,application/octet-stream">
       </label>
@@ -53,7 +53,7 @@
         <button class="tab active" type="button" data-view="players">Players</button>
         <button class="tab" type="button" data-view="teams">Teams</button>
         <button class="tab" type="button" data-view="colors">Colors</button>
-        <button class="tab" type="button" data-view="tsb">TSB Hacks</button>
+        <button class="tab" type="button" data-view="hacks">Game Hacks</button>
         <button class="tab" type="button" data-view="changelog">Change Log</button>
         <button class="tab" type="button" data-view="graphics">Graphics</button>
       </nav>
@@ -72,7 +72,7 @@
         <section class="roster-management">
           <div>
             <h2>Roster Management</h2>
-            <div id="madden-status" class="muted">Load a 28-team Tecmo Super Bowl ROM to update rosters from external player data or run an automatic re-draft.</div>
+            <div id="madden-status" class="muted">Load a supported 28-team NES football ROM to update rosters from external player data or run an automatic re-draft.</div>
             <progress id="roster-progress" value="0" max="100" hidden></progress>
           </div>
             <div class="player-actions">
@@ -124,13 +124,13 @@
         <div class="human-grid team-editor-grid">
           <section class="human-section">
             <h2 id="team-identity-heading">Team Identity</h2>
-            <div id="team-identity-status" class="muted">Load a Tecmo Super Bowl ROM to edit team names.</div>
+            <div id="team-identity-status" class="muted">Load a supported NES football ROM to edit team names.</div>
             <div id="team-identity-editor" class="team-identity-editor"></div>
           </section>
 
           <section class="human-section">
             <h2>Team AI</h2>
-            <div id="team-ai-status" class="muted">Load a Tecmo Super Bowl ROM to edit team AI tendencies.</div>
+            <div id="team-ai-status" class="muted">Load a supported NES football ROM to edit team AI tendencies.</div>
             <div id="team-ai-editor" class="team-ai-editor"></div>
           </section>
 
@@ -155,7 +155,7 @@
         <div class="human-grid team-editor-grid">
           <section class="human-section">
             <h2>Team Colors</h2>
-            <div id="color-status" class="muted">Load a Tecmo Super Bowl ROM to edit mapped color bytes.</div>
+            <div id="color-status" class="muted">Load a supported NES football ROM to edit mapped color bytes.</div>
             <div id="color-editor" class="color-editor"></div>
           </section>
 
@@ -166,13 +166,13 @@
         </div>
       </section>
 
-      <section id="view-tsb" class="view">
+      <section id="view-hacks" class="view">
         <div class="view-bar">
           <div class="control-group">
             <label for="hack-filter">Category</label>
             <select id="hack-filter"></select>
           </div>
-          <span class="muted">TSBTool-style SET commands mapped into safer controls.</span>
+          <span class="muted">Community SET commands mapped into safer controls.</span>
         </div>
 
         <div class="human-grid">
@@ -277,8 +277,8 @@
   <script>
     window.MADDEN_FALLBACK_URL = "assets/data/data.csv";
   </script>
-  <script src="assets/js/tsb-hacks.js"></script>
-  <script src="assets/js/tecmo-editor.js"></script>
+  <script src="assets/js/hacks.js"></script>
+  <script src="assets/js/rom-editor.js"></script>
 </body>
 </html>
 

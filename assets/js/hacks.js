@@ -1,6 +1,6 @@
-window.TSB_HACK_SOURCE = "https://tecmobowl.org/forums/topic/69338-set-commands-list-for-nes-tsb-updated-91725/";
+window.ROM_HACK_SOURCE = "https://tecmobowl.org/forums/topic/69338-set-commands-list-for-nes-tsb-updated-91725/";
 
-window.TSB_HACKS = [
+window.ROM_HACKS = [
   {
     id: "game_year",
     category: "Graphics/Text",
@@ -10,7 +10,7 @@ window.TSB_HACKS = [
     options: [
       {
         label: "Four-digit year",
-        description: "Writes the same four ASCII digits to every known original TSB year location.",
+        description: "Writes the same four ASCII digits to every known title-screen year location.",
         offsets: [0xC129, 0xC4E4, 0x1E128, 0x1E28A, 0x1E2BD, 0x1F89B],
         defaultValue: "2026",
       },
@@ -97,7 +97,7 @@ window.TSB_HACKS = [
     options: [
       {
         label: "Enable QB/PR ball control",
-        description: "Writes the two control bytes from the TSB list.",
+        description: "Writes the two control bytes from the SET command list.",
         sets: [
           { offset: 0x286C7, hex: "12" },
           { offset: 0x286E7, hex: "14" },

@@ -497,18 +497,18 @@ function teamStringTableLooksPlausible(table = teamStringTable) {
 }
 
 function supportedTsbRomStatus() {
-  if (!rom || !meta) return { ok: false, message: "Load a Tecmo Super Bowl ROM before applying TSB-specific hacks." };
-  if (!hasInesHeader(rom)) return { ok: false, message: "This ROM does not appear to be an iNES NES ROM. TSB hacks are disabled." };
-  if (meta.mapper !== 4) return { ok: false, message: "This ROM does not use MMC3 / mapper 4. TSB hacks are disabled." };
-  if (meta.hasTrainer) return { ok: false, message: "This ROM has an iNES trainer. TSB hacks are disabled." };
+  if (!rom || !meta) return { ok: false, message: "Load a supported NES football ROM before applying game-specific hacks." };
+  if (!hasInesHeader(rom)) return { ok: false, message: "This ROM does not appear to be an iNES NES ROM. Game hacks are disabled." };
+  if (meta.mapper !== 4) return { ok: false, message: "This ROM does not use MMC3 / mapper 4. Game hacks are disabled." };
+  if (meta.hasTrainer) return { ok: false, message: "This ROM has an iNES trainer. Game hacks are disabled." };
   if (meta.prgBanks < 16 || meta.chrBanks < 16 || meta.endOffset > rom.length) {
-    return { ok: false, message: "This ROM does not have a plausible Tecmo Super Bowl PRG/CHR layout. TSB hacks are disabled." };
+    return { ok: false, message: "This ROM does not have a plausible supported NES football PRG/CHR layout. Game hacks are disabled." };
   }
   if (!playerTableLooksLikeTsb()) {
-    return { ok: false, message: "This ROM does not appear to contain the supported 28-team Tecmo Super Bowl roster table. TSB hacks are disabled." };
+    return { ok: false, message: "This ROM does not appear to contain the supported 28-team roster table. Game hacks are disabled." };
   }
   if (!teamStringTableLooksPlausible()) {
-    return { ok: false, message: "This ROM does not appear to contain the supported Tecmo Super Bowl team string table. TSB hacks are disabled." };
+    return { ok: false, message: "This ROM does not appear to contain the supported team string table. Game hacks are disabled." };
   }
   return { ok: true, message: "" };
 }
@@ -835,7 +835,7 @@ function detectPlayerNameTable() {
 
     if (validRecords >= 800) {
       return {
-        kind: "Tecmo Super Bowl 28-team pointer roster",
+        kind: "Supported 28-team pointer roster",
         format: "tsb-pointer",
         pointerStart: tsbPointerStart,
         endPointerOffset: tsbEndPointer,
@@ -864,7 +864,7 @@ function detectPlayerNameTable() {
 
     if (plausibleSlots >= 180) {
       return {
-        kind: "Tecmo Bowl 12-team fixed names",
+        kind: "12-team fixed-name roster",
         format: "fixed",
         start: knownTecmoStart,
         count: knownTecmoCount,
@@ -897,7 +897,7 @@ function detectPlayerAttributeTable() {
 
   if (playerTable.count === 28 * 30 && tsbEnd <= rom.length) {
     return {
-      kind: "Tecmo Super Bowl 28-team ability table",
+      kind: "Supported 28-team ability table",
       start: tsbStart,
       teamStride: tsbTeamStride,
       offsets: tsbAbilityOffsets,
@@ -909,7 +909,7 @@ function detectPlayerAttributeTable() {
   return {
     kind: "Unknown attribute table for this ROM",
     supported: false,
-    reason: "This loaded ROM uses the 12-team Tecmo Bowl name table at 0x3028. The confirmed attribute map I found is for Tecmo Super Bowl's 28-team roster format, where ability data starts at 0x3010. Those addresses overlap the 12-team name table here, so writing them would corrupt names instead of safely editing Bernie Kosar's ratings.",
+    reason: "This loaded ROM uses a 12-team fixed-name table at 0x3028. The confirmed 28-team attribute map starts at 0x3010, which overlaps that table here, so writing those bytes would corrupt names.",
   };
 }
 
@@ -935,7 +935,7 @@ function detectTeamStringTable() {
   if (!valid || start + pointers[0] - pointerAdjustment !== pointerEnd) return null;
 
   return {
-    kind: "Tecmo Super Bowl team string table",
+    kind: "Supported team string table",
     start,
     count,
     pointerAdjustment,
@@ -1080,7 +1080,7 @@ function playbookSlotHtml(teamIndex, slotType, slotIndex) {
 
 function renderTeamAi(teamIndex) {
   if (!rom || !looksLikeTsbRom()) {
-    els.teamAiStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM to edit team AI tendencies.";
+    els.teamAiStatus.textContent = "Load a supported 28-team NES football ROM to edit team AI tendencies.";
     els.teamAiEditor.innerHTML = "";
     return;
   }
@@ -1222,7 +1222,7 @@ function renderColorDiff() {
 
 function renderColors() {
   if (!rom || !looksLikeTsbRom()) {
-    els.colorStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM to edit mapped color bytes.";
+    els.colorStatus.textContent = "Load a supported 28-team NES football ROM to edit mapped color bytes.";
     els.colorEditor.innerHTML = "";
     els.colorDiff.textContent = "Edit a color to preview the ROM byte changes.";
     enableControls(Boolean(rom));
@@ -1232,7 +1232,7 @@ function renderColors() {
   const teamIndex = Number(els.colorTeamSelect.value || 0);
   const teamName = TSB_TEAM_NAMES_28[teamIndex] || "Team";
   const teamOffset = TEAM_COLOR_BASE + teamIndex;
-  els.colorStatus.textContent = "These controls edit known palette bytes from the TSB set-command list. Some bytes affect menus or data screens rather than on-field uniforms.";
+  els.colorStatus.textContent = "These controls edit known palette bytes from the SET command list. Some bytes affect menus or data screens rather than on-field uniforms.";
   els.colorEditor.innerHTML = `
     <section class="color-section">
       <h3>${escapeHtml(teamName)} Team Data Screen</h3>
@@ -1262,10 +1262,10 @@ function applyColorEdits() {
 function renderTeams() {
   if (!teamStringTable) {
     els.teamIdentityHeading.textContent = "Team Identity";
-    els.teamIdentityStatus.textContent = "This ROM does not contain the supported 28-team Tecmo Super Bowl string table.";
+    els.teamIdentityStatus.textContent = "This ROM does not contain the supported 28-team team string table.";
     els.teamIdentityEditor.innerHTML = "";
     renderTeamAi(0);
-    els.teamNameDiff.textContent = "Load the 28-team Tecmo Super Bowl ROM to edit team names.";
+    els.teamNameDiff.textContent = "Load a supported 28-team NES football ROM to edit team names.";
     enableControls(Boolean(rom));
     return;
   }
@@ -1299,7 +1299,7 @@ function renderTeams() {
           <option value="${escapeHtml(source)}"${source === selectedRosterSource ? " selected" : ""}>${escapeHtml(source)}</option>
         `).join("")}
       </select>
-      <p class="team-source-note">Team text does not change imports. This source is used by Update Rosters and can only be assigned to one Tecmo slot at a time.</p>
+      <p class="team-source-note">Team text does not change imports. This source is used by Update Rosters and can only be assigned to one ROM team slot at a time.</p>
     </div>
   `;
   renderTeamAi(teamIndex);
@@ -1768,7 +1768,7 @@ function createRandomDraftSeed() {
     bytes[0] = Math.floor(Math.random() * 0xFFFFFFFF);
     bytes[1] = Date.now() & 0xFFFFFFFF;
   }
-  return `TSB-${bytes[0].toString(36).toUpperCase()}-${bytes[1].toString(36).toUpperCase()}`;
+  return `NESFB-${bytes[0].toString(36).toUpperCase()}-${bytes[1].toString(36).toUpperCase()}`;
 }
 
 function currentDraftSeed() {
@@ -1782,7 +1782,7 @@ function currentDraftSeed() {
 
 function createDraftState(mode = "manual", seedText = currentDraftSeed()) {
   if (!playerTable || playerTable.format !== "tsb-pointer" || !playerAttributeTable?.supported) {
-    els.maddenStatus.textContent = "Load the 28-team Tecmo Super Bowl ROM first. Re-draft uses native TSB names, jerseys, and attributes.";
+    els.maddenStatus.textContent = "Load a supported 28-team NES football ROM first. Re-draft uses native names, jerseys, and attributes.";
     return null;
   }
   const teamCount = playerTable.teams.length;
@@ -1951,7 +1951,7 @@ function renderPlayerAttributes() {
     els.attributeEditor.innerHTML = `
       <div class="attribute-message">
         <p>${escapeHtml(playerAttributeTable?.reason || "No editable attribute map is known for this ROM yet.")}</p>
-        <p>For the Bernie Kosar to Deshaun Watson edit, the name can be changed now at ${hex(nameOffset)}. Passing and speed edits need the correct 12-team Tecmo Bowl attribute table before I write bytes.</p>
+        <p>The name can be changed now at ${hex(nameOffset)}. Attribute editing needs a confirmed attribute table before writing bytes safely.</p>
       </div>
       <table class="attribute-table">
         <thead><tr><th>Attribute</th><th>Status</th></tr></thead>
@@ -2012,7 +2012,7 @@ function renderPlayers() {
   els.playerTable.innerHTML = "";
   if (!playerTable) {
     els.playerStatus.textContent = "No supported fixed-width player-name table detected in this ROM yet.";
-    els.playerDiff.textContent = "Open a supported Tecmo/Tecmo Super Bowl ROM or add a table mapping.";
+    els.playerDiff.textContent = "Open a supported NES football ROM or add a table mapping.";
     enableControls(Boolean(rom));
     return;
   }
@@ -2042,7 +2042,7 @@ function renderPlayers() {
           : ""}</td>
         <td>${playerTable.format === "tsb-pointer" && playerAttributeTable?.supported ? facePreviewHtml(faceId) : ""}</td>
         <td>${escapeHtml(current)}</td>
-        <td><input class="player-name-input ${playerTable.format === "tsb-pointer" ? "tsb-name-input" : ""}" data-player-slot="${slotIndex}" maxlength="${playerTable.format === "tsb-pointer" ? 17 : 16}" value="${escapeHtml(pending)}"></td>
+        <td><input class="player-name-input ${playerTable.format === "tsb-pointer" ? "compact-name-input" : ""}" data-player-slot="${slotIndex}" maxlength="${playerTable.format === "tsb-pointer" ? 17 : 16}" value="${escapeHtml(pending)}"></td>
       </tr>
     `);
   }
@@ -2139,7 +2139,7 @@ function renderPlayerDiff() {
     return;
   }
   const formatNote = playerTable.format === "tsb-pointer"
-    ? "Roster names, jersey numbers, attributes, and faces stay staged until Finalize Roster. TSB names are compact variable-length records, so finalizing name changes rebuilds the roster block and updates every player pointer."
+    ? "Roster names, jersey numbers, attributes, and faces stay staged until Finalize Roster. Names are compact variable-length records, so finalizing name changes rebuilds the roster block and updates every player pointer."
     : "Names are stored as fixed 16-byte uppercase slots. Periods are encoded as [ in this ROM.";
   els.playerDiff.innerHTML = `
     <h3>${sets.length} pending roster change${sets.length === 1 ? "" : "s"}</h3>
@@ -2196,7 +2196,7 @@ function rebuildTsbNameBlock() {
   }
 
   if (playerTable.dataStart + totalLength > playerTable.dataLimit) {
-    throw new Error(`The edited TSB names need ${totalLength} bytes, but only ${playerTable.dataLimit - playerTable.dataStart} bytes are available.`);
+    throw new Error(`The edited names need ${totalLength} bytes, but only ${playerTable.dataLimit - playerTable.dataStart} bytes are available.`);
   }
 
   rom.fill(0xFF, playerTable.dataStart, playerTable.dataLimit);
@@ -2270,7 +2270,7 @@ function toTecmoRunningSpeedNibble(value, player, roleLabel) {
   else if (value >= 72) ratingNibble = 3; // 25
   else if (value >= 64) ratingNibble = 2; // 19
   else if (value >= 55) ratingNibble = 1; // 13
-  else ratingNibble = 0; // 6, the lowest visible TSB rating
+  else ratingNibble = 0; // 6, the lowest visible rating in this ROM format
 
   const position = String(player.position || "").toUpperCase().trim();
   const group = playerPositionGroup(player);
@@ -2792,16 +2792,16 @@ function selectedOptionForHack(hack) {
 }
 
 function renderHackCategories() {
-  const hacks = window.TSB_HACKS || [];
+  const hacks = window.ROM_HACKS || [];
   const categories = ["All", ...Array.from(new Set(hacks.map((hack) => hack.category)))];
   els.hackFilter.innerHTML = categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("");
   renderHackControls();
 }
 
 function renderHackControls() {
-  const hacks = window.TSB_HACKS || [];
+  const hacks = window.ROM_HACKS || [];
   if (!hacks.length) {
-    els.hackControls.innerHTML = "<p class=\"muted\">No TSB hack data file loaded.</p>";
+    els.hackControls.innerHTML = "<p class=\"muted\">No hack data file loaded.</p>";
     return;
   }
 
@@ -2938,7 +2938,7 @@ function writePendingPlayerNamesToBytes(target) {
   }
 
   if (playerTable.dataStart + totalLength > playerTable.dataLimit) {
-    throw new Error(`The edited TSB names need ${totalLength} bytes, but only ${playerTable.dataLimit - playerTable.dataStart} bytes are available.`);
+    throw new Error(`The edited names need ${totalLength} bytes, but only ${playerTable.dataLimit - playerTable.dataStart} bytes are available.`);
   }
 
   target.fill(0xFF, playerTable.dataStart, playerTable.dataLimit);
@@ -3230,12 +3230,12 @@ function regionForOffset(offset) {
 }
 
 function buildChangeLogMarkdown() {
-  if (!rom || !originalRom) return "# Tecmo Super Bowl ROM Change Log\n\nLoad a ROM before generating a change log.\n";
+  if (!rom || !originalRom) return "# NES Football ROM Change Log\n\nLoad a ROM before generating a change log.\n";
   const snapshot = romSnapshotWithPendingChanges();
   const ranges = byteDiffRanges(originalRom, snapshot);
   const changedBytes = ranges.reduce((sum, range) => sum + range.before.length, 0);
   const lines = [
-    "# Tecmo Super Bowl ROM Change Log",
+    "# NES Football ROM Change Log",
     "",
     `- Source ROM: ${romName}`,
     `- Generated: ${new Date().toLocaleString()}`,
@@ -3281,7 +3281,7 @@ function generateChangeLog() {
     els.changelogOutput.value = buildChangeLogMarkdown();
     enableControls(Boolean(rom));
   } catch (error) {
-    els.changelogOutput.value = `# Tecmo Super Bowl ROM Change Log\n\nCould not generate change log: ${error.message}\n`;
+    els.changelogOutput.value = `# NES Football ROM Change Log\n\nCould not generate change log: ${error.message}\n`;
     enableControls(Boolean(rom));
   }
 }
@@ -3291,7 +3291,7 @@ function downloadChangeLog() {
   const blob = new Blob([markdown], { type: "text/markdown" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `README_tsb_${timestampForFilename()}.md`;
+  a.download = `README_nes_football_${timestampForFilename()}.md`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -3404,7 +3404,7 @@ async function exportRom() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     const year = exportGameYear();
-    a.download = `tsb_${year ? `${year}_` : ""}${timestampForFilename()}.nes`;
+    a.download = `nes_football_${year ? `${year}_` : ""}${timestampForFilename()}.nes`;
     a.click();
     URL.revokeObjectURL(a.href);
     els.setStatus.textContent = `Exported ${a.download}`;
@@ -3437,7 +3437,7 @@ els.hackFilter.addEventListener("change", () => {
 els.hackControls.addEventListener("click", (event) => {
   const button = event.target.closest("[data-hack]");
   if (!button) return;
-  const hack = (window.TSB_HACKS || []).find((item) => item.id === button.dataset.hack);
+  const hack = (window.ROM_HACKS || []).find((item) => item.id === button.dataset.hack);
   if (!hack) return;
 
   try {

@@ -690,7 +690,7 @@ input[type="range"] {
   color: var(--ink);
 }
 
-.player-name-input.tsb-name-input {
+.player-name-input.compact-name-input {
   text-transform: none;
 }
 
