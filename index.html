@@ -50,15 +50,15 @@
 
     <section class="main-panel">
       <nav class="tabs" aria-label="Editor views">
-        <button class="tab active" type="button" data-view="players">Players</button>
-        <button class="tab" type="button" data-view="teams">Teams</button>
+        <button class="tab active" type="button" data-view="teams">Teams</button>
+        <button class="tab" type="button" data-view="players">Players</button>
         <button class="tab" type="button" data-view="colors">Colors</button>
         <button class="tab" type="button" data-view="hacks">Game Hacks</button>
         <button class="tab" type="button" data-view="changelog">Change Log</button>
         <button class="tab" type="button" data-view="graphics">Graphics</button>
       </nav>
 
-      <section id="view-players" class="view active">
+      <section id="view-players" class="view">
         <div class="view-bar">
           <div class="control-group">
             <label for="team-select">Team</label>
@@ -72,11 +72,10 @@
         <section class="roster-management">
           <div>
             <h2>Roster Management</h2>
-            <div id="madden-status" class="muted">Load a supported 28-team NES football ROM to update rosters from external player data or run an automatic re-draft.</div>
+            <div id="roster-status" class="muted">Load a supported 28-team NES football ROM to run an automatic re-draft from the loaded roster.</div>
             <progress id="roster-progress" value="0" max="100" hidden></progress>
           </div>
             <div class="player-actions">
-              <button id="update-rosters" type="button" disabled>Update Rosters</button>
               <label class="seed-control" for="draft-seed">Seed
                 <input id="draft-seed" type="text" placeholder="optional">
               </label>
@@ -109,7 +108,7 @@
         </div>
       </section>
 
-      <section id="view-teams" class="view">
+      <section id="view-teams" class="view active">
         <div class="view-bar">
           <div class="control-group">
             <label for="identity-team-select">Team</label>
@@ -273,10 +272,6 @@
       <div id="work-count" class="muted">0 / 0</div>
     </section>
   </div>
-
-  <script>
-    window.MADDEN_FALLBACK_URL = "assets/data/data.csv";
-  </script>
   <script src="assets/js/hacks.js"></script>
   <script src="assets/js/rom-editor.js"></script>
 </body>
