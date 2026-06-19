@@ -349,7 +349,7 @@ input[type="range"] {
   align-items: start;
 }
 
-.roster-management {
+.draft-room {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -361,7 +361,7 @@ input[type="range"] {
   background: var(--panel);
 }
 
-.roster-management h2 {
+.draft-room h2 {
   margin: 0 0 4px;
   font-size: 13px;
   text-transform: uppercase;
@@ -369,7 +369,7 @@ input[type="range"] {
   color: var(--muted);
 }
 
-.roster-management progress {
+.draft-room progress {
   width: min(520px, 100%);
   height: 10px;
   margin-top: 8px;
@@ -666,15 +666,12 @@ input[type="range"] {
   border-radius: 6px;
 }
 
-.player-table,
-.madden-preview {
+.player-table {
   border: 0;
 }
 
 .player-table th,
-.player-table td,
-.madden-preview th,
-.madden-preview td {
+.player-table td {
   white-space: nowrap;
 }
 
@@ -779,80 +776,6 @@ input[type="range"] {
   min-width: 92px;
   min-height: 34px;
   font-family: Consolas, "Courier New", monospace;
-}
-
-.madden-preview {
-  margin-top: 12px;
-}
-
-.import-start {
-  min-height: 280px;
-  display: grid;
-  place-items: center;
-}
-
-.import-start[hidden],
-#import-workspace[hidden] {
-  display: none;
-}
-
-.import-start button {
-  min-width: 220px;
-  min-height: 52px;
-  font-size: 16px;
-}
-
-.import-sync-flow {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
-  gap: 14px;
-  align-items: stretch;
-  margin: 14px 0;
-}
-
-.import-sync-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-raised);
-  padding: 14px;
-}
-
-.import-sync-card h3 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 14px;
-}
-
-.import-sync-card label {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.import-sync-target {
-  align-content: center;
-}
-
-.import-team-target {
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  font-weight: 700;
-  color: var(--teal);
-  font-size: 18px;
-}
-
-.import-arrow {
-  display: grid;
-  place-items: center;
-  color: var(--teal);
-  font: 700 28px/1 Consolas, "Courier New", monospace;
-}
-
-.import-actions {
-  justify-content: flex-end;
-  margin-bottom: 10px;
 }
 
 .attribute-editor {
@@ -1192,16 +1115,8 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 
-  .import-sync-flow {
-    grid-template-columns: 1fr;
-  }
-
-  .import-arrow {
-    transform: rotate(90deg);
-  }
-
   .human-grid,
-  .roster-management,
+  .draft-room,
   .hack-card {
     grid-template-columns: 1fr;
   }
