@@ -102,12 +102,19 @@
             <progress id="roster-progress" value="0" max="100" hidden></progress>
           </div>
           <div class="player-actions">
+            <label class="seed-control" for="draft-mode">Mode
+              <select id="draft-mode" disabled>
+                <option value="need" selected>Need-Based Drafting</option>
+                <option value="best">Best Available</option>
+              </select>
+            </label>
             <label class="seed-control" for="draft-seed">Seed
               <input id="draft-seed" type="text" placeholder="optional">
             </label>
             <button id="random-draft-seed" type="button" disabled>Random Seed</button>
-            <button id="redraft-rosters" type="button" disabled>Start Draft</button>
-            <button id="revert-draft" type="button" disabled>Undo Draft</button>
+            <button id="redraft-rosters" type="button" disabled>Run Draft</button>
+            <button id="step-draft" type="button" disabled>Step Draft</button>
+            <button id="revert-draft" type="button" disabled>Reset Draft</button>
             <button id="finalize-draft" type="button" disabled>Finalize Draft</button>
           </div>
         </section>
@@ -116,6 +123,24 @@
           <h2>Draft Notes</h2>
           <div class="hack-detail">
             Draft uses the current loaded roster as the player pool. Team AI run/pass preferences influence draft priorities before backup slots are filled.
+          </div>
+          <div class="draft-dashboard">
+            <section class="draft-panel draft-panel-board">
+              <h3>Draft Board</h3>
+              <div id="draft-board" class="draft-board empty">Load a ROM, then run or step through a draft.</div>
+            </section>
+            <section class="draft-panel">
+              <h3>Team Needs</h3>
+              <div id="draft-team-needs" class="draft-needs empty">No active draft.</div>
+            </section>
+            <section class="draft-panel">
+              <h3>Draft History</h3>
+              <div id="draft-history" class="draft-history empty">No picks yet.</div>
+            </section>
+            <section class="draft-panel draft-panel-wide">
+              <h3>Drafted Rosters</h3>
+              <div id="draft-team-rosters" class="draft-team-rosters empty">No teams have drafted yet.</div>
+            </section>
           </div>
           <div id="draft-results" class="draft-results empty">Start a draft to see each team's picks by round.</div>
         </section>

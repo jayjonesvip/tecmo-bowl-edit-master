@@ -481,6 +481,132 @@ input[type="range"] {
   font: 12px/1.4 Consolas, "Courier New", monospace;
 }
 
+.draft-dashboard {
+  display: grid;
+  grid-template-columns: minmax(460px, 1.3fr) minmax(260px, .7fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.draft-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--dark);
+}
+
+.draft-panel h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.draft-panel-board,
+.draft-panel-wide {
+  grid-row: span 2;
+}
+
+.draft-board,
+.draft-history,
+.draft-team-rosters {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.draft-board.empty,
+.draft-history.empty,
+.draft-team-rosters.empty,
+.draft-needs.empty {
+  min-height: 80px;
+  display: grid;
+  align-items: center;
+  color: var(--muted);
+}
+
+.draft-board table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.draft-board th,
+.draft-board td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.draft-board th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.draft-board td strong,
+.draft-board td small {
+  display: block;
+}
+
+.draft-board td small {
+  color: var(--muted);
+}
+
+.draft-board tr.drafted {
+  opacity: .58;
+}
+
+.draft-history-row {
+  display: grid;
+  grid-template-columns: 58px minmax(70px, .7fr) minmax(120px, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+.draft-history-row span {
+  color: #9de1d6;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.draft-history-row em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.draft-team-rosters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+}
+
+.draft-team-rosters article {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--panel-raised);
+}
+
+.draft-team-rosters h4 {
+  margin: 0 0 6px;
+  color: #9de1d6;
+}
+
+.draft-team-rosters article div {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font: 11px/1.25 Consolas, "Courier New", monospace;
+}
+
 .draft-results {
   margin-top: 12px;
   display: grid;
@@ -1207,7 +1333,13 @@ tr:last-child td {
 
   .human-grid,
   .draft-room,
+  .draft-dashboard,
   .hack-card {
     grid-template-columns: 1fr;
+  }
+
+  .draft-panel-board,
+  .draft-panel-wide {
+    grid-row: auto;
   }
 }

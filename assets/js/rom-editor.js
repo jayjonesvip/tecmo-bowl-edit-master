@@ -37,11 +37,17 @@ const els = {
   changelogOutput: document.querySelector("#changelog-output"),
   teamSelect: document.querySelector("#team-select"),
   redraftRosters: document.querySelector("#redraft-rosters"),
+  stepDraft: document.querySelector("#step-draft"),
   revertDraft: document.querySelector("#revert-draft"),
   finalizeDraft: document.querySelector("#finalize-draft"),
+  draftMode: document.querySelector("#draft-mode"),
   draftSeed: document.querySelector("#draft-seed"),
   randomDraftSeed: document.querySelector("#random-draft-seed"),
   draftResults: document.querySelector("#draft-results"),
+  draftBoard: document.querySelector("#draft-board"),
+  draftTeamNeeds: document.querySelector("#draft-team-needs"),
+  draftHistory: document.querySelector("#draft-history"),
+  draftTeamRosters: document.querySelector("#draft-team-rosters"),
   identityTeamSelect: document.querySelector("#identity-team-select"),
   teamIdentityHeading: document.querySelector("#team-identity-heading"),
   teamIdentityStatus: document.querySelector("#team-identity-status"),
@@ -221,6 +227,12 @@ const TSB_SLOT_ROLES_30 = TSB_POSITIONS_30.map((position) => {
 const TSB_ATTRIBUTE_VALUE_STEPS = [6, 13, 19, 25, 31, 38, 44, 50, 56, 63, 69, 75, 81, 88, 94, 100];
 const TSB_IMPORT_NAME_LIMIT = 15;
 const DRAFT_GROUP_ORDER = ["QB", "RB", "REC", "OL", "DL", "LB", "DB", "K", "P"];
+const DRAFT_GROUP_LABELS = { QB: "QB", RB: "RB", REC: "WR/TE", DB: "DB", LB: "LB", DL: "DL", OL: "OL", K: "K/P/ST", P: "K/P/ST", DEPTH: "Depth" };
+const DRAFT_POSITION_VALUES = { QB: 0.22, RB: 0.18, REC: 0.15, DB: 0.13, LB: 0.11, DL: 0.09, OL: 0.07, K: 0.03, P: 0.03, DEPTH: 0.02 };
+const DRAFT_GROUP_TARGETS = { QB: 1, RB: 2, REC: 3, DB: 4, LB: 4, DL: 3, OL: 5, K: 1, P: 1 };
+const DRAFT_STARTER_PHASE_GROUPS = ["QB", "RB", "REC", "DB", "LB", "DL", "OL"];
+const DRAFT_MID_PHASE_GROUPS = ["DB", "LB", "DL", "OL", "REC", "RB", "QB"];
+const DRAFT_LATE_PHASE_GROUPS = ["K", "P", "RB", "REC", "QB"];
 const TSB_FACE_IDS = [
   ...Array.from({ length: 0x53 }, (_, index) => index),
   ...Array.from({ length: 0x55 }, (_, index) => 0x80 + index),
@@ -474,8 +486,10 @@ function enableControls(enabled) {
   els.applyColorChanges.disabled = !enabled || !pendingColorEdits.size;
   els.applyPlayerNames.disabled = !enabled || !hasPendingRosterChanges();
   els.redraftRosters.disabled = !enabled || !supportedDraftLoaded();
+  els.stepDraft.disabled = !enabled || !supportedDraftLoaded() || draftState?.complete;
   els.revertDraft.disabled = !enabled || !draftUndoSnapshot;
   els.finalizeDraft.disabled = !enabled || !hasPendingRosterChanges();
+  els.draftMode.disabled = !enabled || !supportedDraftLoaded();
   els.randomDraftSeed.disabled = !enabled || !supportedDraftLoaded();
   els.downloadChangelog.disabled = !enabled || !els.changelogOutput.value.trim();
 }
@@ -1457,14 +1471,180 @@ function writePlayerAttributeValues(slotIndex, values) {
   return true;
 }
 
-function draftRatingFromAttributes(attrs, roleLabel = "") {
-  if (!attrs?.values?.length) return 0;
-  const ratings = attrs.values.map((nibble) => TSB_ATTRIBUTE_VALUE_STEPS[nibble] || 0);
-  const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
-  const group = draftGroupForTeamSlot(TSB_POSITIONS_30.indexOf(roleLabel));
-  const positionFactor = { QB: 1.08, RB: 1.10, REC: 1.07, DB: 1.02, LB: 1.00, DL: 0.98, OL: 0.92, K: 0.55, P: 0.50 }[group] || 1;
-  const starterBonus = DRAFT_BACKUP_SLOTS.has(roleLabel) ? 0 : 4;
-  return Math.round((average * positionFactor) + starterBonus);
+function draftValueFromNibble(nibble) {
+  return TSB_ATTRIBUTE_VALUE_STEPS[Number(nibble) & 0x0F] || 0;
+}
+
+function draftAttributeMap(attrs) {
+  const map = {};
+  if (!attrs?.labels?.length) return map;
+  attrs.labels.forEach((label, index) => {
+    map[label.toLowerCase()] = draftValueFromNibble(attrs.values[index]);
+  });
+  return map;
+}
+
+function draftAttr(map, labels, fallback = 50) {
+  for (const label of labels) {
+    const value = map[label.toLowerCase()];
+    if (Number.isFinite(value)) return value;
+  }
+  return fallback;
+}
+
+function draftTraitsFromAttributes(attrs) {
+  const map = draftAttributeMap(attrs);
+  const runningSpeed = draftAttr(map, ["Running Speed"], 0);
+  const rushingPower = draftAttr(map, ["Rushing Power"], 0);
+  const maximumSpeed = draftAttr(map, ["Maximum Speed", "Max Speed"], runningSpeed);
+  const hittingPower = draftAttr(map, ["Hitting Power"], rushingPower);
+  const passingSpeed = draftAttr(map, ["Passing Speed"], 0);
+  const passControl = draftAttr(map, ["Pass Control"], 0);
+  const passingAccuracy = draftAttr(map, ["Passing Accuracy"], passControl);
+  const avoidPassBlock = draftAttr(map, ["Avoid Pass Block", "Pass Rush", "Avoid Kick Block"], hittingPower);
+  const ballControl = draftAttr(map, ["Ball Control"], 50);
+  const receptions = draftAttr(map, ["Receptions", "Interceptions"], 0);
+  const kicking = draftAttr(map, ["Kicking Ability"], 0);
+  return {
+    runningSpeed,
+    rushingPower,
+    maximumSpeed,
+    hittingPower,
+    passingSpeed,
+    passControl,
+    passingAccuracy,
+    avoidPassBlock,
+    ballControl,
+    receptions,
+    kicking,
+    speed: Math.round((runningSpeed + maximumSpeed) / 2),
+  };
+}
+
+function weightedTecmoScore(items) {
+  return Math.round(items.reduce((sum, [value, weight]) => sum + value * weight, 0));
+}
+
+function draftPositionRating(group, traits) {
+  if (group === "QB") return weightedTecmoScore([
+    [traits.passingAccuracy, 0.30],
+    [traits.passControl, 0.25],
+    [traits.passingSpeed, 0.15],
+    [traits.runningSpeed, 0.10],
+    [traits.maximumSpeed, 0.08],
+    [traits.ballControl, 0.07],
+    [traits.avoidPassBlock, 0.05],
+  ]);
+  if (group === "RB") return weightedTecmoScore([
+    [traits.runningSpeed, 0.25],
+    [traits.maximumSpeed, 0.25],
+    [traits.ballControl, 0.20],
+    [traits.rushingPower, 0.15],
+    [traits.receptions, 0.10],
+    [traits.hittingPower, 0.05],
+  ]);
+  if (group === "REC") return weightedTecmoScore([
+    [traits.maximumSpeed, 0.30],
+    [traits.runningSpeed, 0.25],
+    [traits.receptions, 0.25],
+    [traits.ballControl, 0.10],
+    [traits.rushingPower, 0.05],
+    [50, 0.05],
+  ]);
+  if (group === "DB") return weightedTecmoScore([
+    [traits.maximumSpeed, 0.30],
+    [traits.runningSpeed, 0.25],
+    [traits.receptions, 0.20],
+    [traits.hittingPower, 0.15],
+    [traits.ballControl, 0.05],
+    [traits.rushingPower, 0.05],
+  ]);
+  if (group === "LB") return weightedTecmoScore([
+    [traits.runningSpeed, 0.25],
+    [traits.hittingPower, 0.25],
+    [traits.maximumSpeed, 0.20],
+    [traits.avoidPassBlock, 0.15],
+    [traits.rushingPower, 0.10],
+    [traits.receptions, 0.05],
+  ]);
+  if (group === "DL") return weightedTecmoScore([
+    [traits.avoidPassBlock, 0.30],
+    [traits.hittingPower, 0.25],
+    [traits.runningSpeed, 0.20],
+    [traits.rushingPower, 0.15],
+    [traits.maximumSpeed, 0.10],
+  ]);
+  if (group === "OL") return weightedTecmoScore([
+    [traits.avoidPassBlock, 0.40],
+    [traits.rushingPower, 0.25],
+    [traits.hittingPower, 0.15],
+    [traits.runningSpeed, 0.10],
+    [50, 0.10],
+  ]);
+  if (group === "K" || group === "P") return weightedTecmoScore([
+    [traits.kicking, 0.45],
+    [traits.maximumSpeed, 0.15],
+    [traits.runningSpeed, 0.15],
+    [traits.hittingPower, 0.10],
+    [traits.rushingPower, 0.10],
+    [50, 0.05],
+  ]);
+  return 0;
+}
+
+function draftScoreBreakdown(group, roleLabel, traits, positionRating) {
+  const depth = DRAFT_BACKUP_SLOTS.has(roleLabel);
+  const value = depth ? DRAFT_POSITION_VALUES.DEPTH : DRAFT_POSITION_VALUES[group] || 0.05;
+  let score = positionRating * value * 5;
+  const notes = [`${DRAFT_GROUP_LABELS[depth ? "DEPTH" : group] || group} value`];
+
+  if ((group === "RB" || group === "REC" || group === "DB") && traits.speed >= 88) {
+    score += 4;
+    notes.push("elite speed");
+  }
+  if (group === "RB" && traits.ballControl >= 88) {
+    score += 5;
+    notes.push("elite ball control");
+  }
+  if (group === "QB" && traits.passingAccuracy >= 88) {
+    score += 5;
+    notes.push("elite accuracy");
+  }
+  if ((group === "RB" || group === "REC") && traits.ballControl <= 38) {
+    score -= 6;
+    notes.push("ball control penalty");
+  }
+  if (group === "DB" && traits.speed <= 44) {
+    score -= 5;
+    notes.push("slow DB penalty");
+  }
+  if (group === "QB" && traits.passingAccuracy <= 44) {
+    score -= 7;
+    notes.push("weak accuracy penalty");
+  }
+
+  return { score, notes };
+}
+
+function applyDraftRankBonuses(players) {
+  const topQbs = players.filter((player) => player.group === "QB").sort((a, b) => b.positionRating - a.positionRating).slice(0, 3);
+  const topSpeedWeapons = players.filter((player) => player.group === "RB" || player.group === "REC").sort((a, b) => b.traits.speed - a.traits.speed).slice(0, 5);
+  const topSpeedDbs = players.filter((player) => player.group === "DB").sort((a, b) => b.traits.speed - a.traits.speed).slice(0, 5);
+  topQbs.forEach((player) => {
+    player.draftScore += 8;
+    player.scoreNotes.push("top 3 QB");
+  });
+  topSpeedWeapons.forEach((player) => {
+    player.draftScore += 7;
+    player.scoreNotes.push("top 5 weapon speed");
+  });
+  topSpeedDbs.forEach((player) => {
+    player.draftScore += 6;
+    player.scoreNotes.push("top 5 DB speed");
+  });
+  players.forEach((player) => {
+    player.draftScore = Math.round(player.draftScore);
+  });
 }
 
 function hashSeed(seedText) {
@@ -1507,14 +1687,45 @@ function draftGroupForTeamSlot(teamSlot) {
 }
 
 function draftPhaseForTeamSlot(teamSlot) {
-  return DRAFT_BACKUP_SLOTS.has(TSB_POSITIONS_30[teamSlot]) ? 1 : 0;
+  const role = TSB_POSITIONS_30[teamSlot];
+  const group = draftGroupForTeamSlot(teamSlot);
+  if (DRAFT_BACKUP_SLOTS.has(role)) return 3;
+  if (group === "K" || group === "P") return 2;
+  if (group === "OL" || group === "DL" || group === "LB") return 1;
+  return 0;
+}
+
+function draftRoundForPick(pickIndex = draftState?.pickIndex || 0) {
+  if (!draftState) return 1;
+  return Math.floor(pickIndex / draftState.teamCount) + 1;
+}
+
+function draftAllowedGroupsForRound(round) {
+  if (round <= 1) return DRAFT_STARTER_PHASE_GROUPS.filter((group) => ["QB", "RB", "REC", "DB"].includes(group));
+  if (round <= 3) return ["QB", "RB", "REC", "DB", "LB", "DL"];
+  if (round <= 24) return DRAFT_MID_PHASE_GROUPS;
+  return DRAFT_LATE_PHASE_GROUPS;
+}
+
+function draftSlotAllowedThisRound(teamSlot, round, relaxed = false) {
+  if (relaxed) return true;
+  const group = draftGroupForTeamSlot(teamSlot);
+  const phase = draftPhaseForTeamSlot(teamSlot);
+  if (!draftAllowedGroupsForRound(round).includes(group)) return false;
+  if (round <= 3 && phase > 0) return false;
+  if (round <= 24 && phase > 1) return false;
+  return true;
 }
 
 function draftCurrentPhase(roster) {
-  for (let phase = 0; phase <= 1; phase += 1) {
+  const round = draftRoundForPick();
+  for (let phase = 0; phase <= 3; phase += 1) {
+    if (roster.some((player, teamSlot) => !player && draftPhaseForTeamSlot(teamSlot) === phase && draftSlotAllowedThisRound(teamSlot, round))) return phase;
+  }
+  for (let phase = 0; phase <= 3; phase += 1) {
     if (roster.some((player, teamSlot) => !player && draftPhaseForTeamSlot(teamSlot) === phase)) return phase;
   }
-  return 2;
+  return 4;
 }
 
 function draftGroupCounts(roster) {
@@ -1527,19 +1738,32 @@ function draftGroupCounts(roster) {
   return counts;
 }
 
-function draftOpenSlotForPlayer(roster, player) {
+function draftOpenSlotForPlayer(roster, player, relaxed = false) {
   const groups = player.groups?.length ? player.groups : [player.group];
   const phase = draftCurrentPhase(roster);
+  const round = draftRoundForPick();
+  let fallback = -1;
   for (let teamSlot = 0; teamSlot < TSB_POSITIONS_30.length; teamSlot += 1) {
-    if (!roster[teamSlot] && draftPhaseForTeamSlot(teamSlot) === phase && groups.includes(draftGroupForTeamSlot(teamSlot))) return teamSlot;
+    if (roster[teamSlot] || !groups.includes(draftGroupForTeamSlot(teamSlot))) continue;
+    if (draftPhaseForTeamSlot(teamSlot) !== phase && !relaxed) {
+      if (fallback < 0) fallback = teamSlot;
+      continue;
+    }
+    if (!draftSlotAllowedThisRound(teamSlot, round, relaxed)) {
+      if (fallback < 0) fallback = teamSlot;
+      continue;
+    }
+    return teamSlot;
   }
-  return -1;
+  return relaxed ? fallback : -1;
 }
 
 function draftEligiblePlayersForTeam(teamIndex) {
   if (!draftState) return [];
   const roster = draftState.rosters[teamIndex];
-  return draftState.pool.filter((player) => !player.drafted && draftOpenSlotForPlayer(roster, player) >= 0);
+  const strict = draftState.pool.filter((player) => !player.drafted && draftOpenSlotForPlayer(roster, player) >= 0);
+  if (strict.length) return strict;
+  return draftState.pool.filter((player) => !player.drafted && draftOpenSlotForPlayer(roster, player, true) >= 0);
 }
 
 function draftAiPreferenceValue(teamIndex) {
@@ -1583,6 +1807,10 @@ function buildDraftPool() {
     const role = slotRoleForTeamSlot(teamSlot);
     const attrs = readPlayerAttributes(slotIndex);
     const name = readPlayerName(slotIndex);
+    const group = role.groups[0];
+    const traits = draftTraitsFromAttributes(attrs);
+    const positionRating = draftPositionRating(group, traits);
+    const breakdown = draftScoreBreakdown(group, role.label, traits, positionRating);
     players.push({
       id: slotIndex,
       sourceSlot: slotIndex,
@@ -1590,16 +1818,24 @@ function buildDraftPool() {
       sourceTeamIndex: teamIndex,
       sourceTeamSlot: teamSlot,
       sourceRole: role.label,
-      group: role.groups[0],
+      group,
       groups: role.groups,
       name,
       number: readPlayerNumber(slotIndex),
       attributes: attrs?.values?.slice() || [],
       faceId: readPlayerFace(slotIndex),
-      rating: draftRatingFromAttributes(attrs, role.label),
+      traits,
+      positionRating,
+      draftScore: breakdown.score,
+      scoreNotes: breakdown.notes,
+      rating: Math.round(breakdown.score),
       drafted: false,
     });
   }
+  applyDraftRankBonuses(players);
+  players.forEach((player) => {
+    player.rating = player.draftScore;
+  });
   return players;
 }
 
@@ -1628,7 +1864,7 @@ function currentDraftSeed(refreshAutoSeed = false) {
   return seed;
 }
 
-function createDraftState(mode = "manual", seedText = currentDraftSeed()) {
+function createDraftState(mode = els.draftMode?.value || "need", seedText = currentDraftSeed()) {
   if (!playerTable || playerTable.format !== "tsb-pointer" || !playerAttributeTable?.supported) {
     els.rosterStatus.textContent = "Load a supported 28-team NES football ROM first. Draft uses native names, jerseys, and attributes.";
     return null;
@@ -1649,7 +1885,7 @@ function createDraftState(mode = "manual", seedText = currentDraftSeed()) {
     teamCount,
     slotsPerTeam,
     totalPicks: teamCount * slotsPerTeam,
-    pool: buildDraftPool().sort((a, b) => b.rating - a.rating),
+    pool: buildDraftPool().sort((a, b) => b.draftScore - a.draftScore),
     rosters: Array.from({ length: teamCount }, () => Array(slotsPerTeam).fill(null)),
     log: [],
     picks: [],
@@ -1659,18 +1895,24 @@ function createDraftState(mode = "manual", seedText = currentDraftSeed()) {
 function draftScorePlayer(teamIndex, player) {
   const roster = draftState.rosters[teamIndex];
   const counts = draftGroupCounts(roster);
-  const phase = draftCurrentPhase(roster);
+  const round = draftRoundForPick();
+  const mode = draftState.mode;
   const openInGroup = roster.filter((slotPlayer, teamSlot) => (
     !slotPlayer
-    && draftPhaseForTeamSlot(teamSlot) === phase
     && player.groups.includes(draftGroupForTeamSlot(teamSlot))
   )).length;
   const filledInGroup = counts[player.group]?.filled || 0;
   const scarcity = draftState.pool.filter((candidate) => !candidate.drafted && candidate.group === player.group).length;
-  const needBonus = openInGroup * 12 - filledInGroup;
-  const scarcityBonus = scarcity ? Math.max(0, 18 - scarcity / 2) : 0;
-  const aiBonus = phase === 0 ? draftAiGroupBonus(teamIndex, player.group) : 0;
-  return player.rating + needBonus + scarcityBonus + aiBonus + draftState.random() * 6;
+  const target = DRAFT_GROUP_TARGETS[player.group] || 1;
+  const missingTarget = Math.max(0, target - filledInGroup);
+  const needWeight = mode === "best" ? 0.35 : 1;
+  const needBonus = (openInGroup * 8 + missingTarget * 10 - filledInGroup * 2) * needWeight;
+  const scarcityBonus = scarcity ? Math.max(0, 14 - scarcity / 2) : 0;
+  const roundGroups = draftAllowedGroupsForRound(round);
+  const roundBonus = roundGroups.includes(player.group) ? 8 : -10;
+  const aiBonus = draftAiGroupBonus(teamIndex, player.group);
+  const userControlBonus = ["QB", "RB", "REC", "DB"].includes(player.group) ? player.traits.speed / 12 : 0;
+  return player.draftScore + needBonus + scarcityBonus + roundBonus + aiBonus + userControlBonus + draftState.random() * 4;
 }
 
 function draftSelectAiPlayer(teamIndex) {
@@ -1684,7 +1926,8 @@ function draftSelectAiPlayer(teamIndex) {
 function draftPlayerForTeam(teamIndex, player, forced = false) {
   if (!draftState || !player || player.drafted) return false;
   const roster = draftState.rosters[teamIndex];
-  const teamSlot = draftOpenSlotForPlayer(roster, player);
+  let teamSlot = draftOpenSlotForPlayer(roster, player);
+  if (teamSlot < 0) teamSlot = draftOpenSlotForPlayer(roster, player, true);
   if (teamSlot < 0) return false;
   roster[teamSlot] = player;
   player.drafted = true;
@@ -1701,6 +1944,7 @@ function draftPlayerForTeam(teamIndex, player, forced = false) {
     teamName,
     teamSlot,
     targetRole,
+    sourceSlot: player.sourceSlot,
     playerName: player.name,
     sourceRole: player.sourceRole,
     sourceTeam: player.sourceTeam,
@@ -1728,8 +1972,121 @@ function autoDraftOnePick(forUser = false) {
   return draftPlayerForTeam(teamIndex, player, forUser);
 }
 
+function draftCurrentTeamName() {
+  const teamIndex = currentDraftTeamIndex();
+  if (teamIndex < 0) return "Draft complete";
+  return playerTable.teams[teamIndex]?.name || `Team ${teamIndex + 1}`;
+}
+
+function renderDraftBoard() {
+  if (!els.draftBoard) return;
+  const pool = draftState?.pool?.length ? draftState.pool : buildDraftPool().sort((a, b) => b.draftScore - a.draftScore);
+  if (!pool.length) {
+    els.draftBoard.className = "draft-board empty";
+    els.draftBoard.textContent = "Load a supported 28-team NES football ROM to build the draft board.";
+    return;
+  }
+  const rows = pool
+    .slice()
+    .sort((a, b) => {
+      if (a.drafted !== b.drafted) return a.drafted ? 1 : -1;
+      return b.draftScore - a.draftScore;
+    })
+    .map((player) => {
+      const pick = draftState?.picks?.find((item) => item.sourceSlot === player.sourceSlot);
+      const status = pick ? `R${pick.round} P${pick.pick} ${pick.teamName}` : "Available";
+      return `
+        <tr class="${player.drafted ? "drafted" : ""}">
+          <td>${facePreviewHtml(player.faceId, "draft-face")}</td>
+          <td><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(player.sourceTeam)}</small></td>
+          <td>${escapeHtml(player.sourceRole)}</td>
+          <td>${Math.round(player.draftScore)}</td>
+          <td>RS ${player.traits.runningSpeed} / MS ${player.traits.maximumSpeed} / BC ${player.traits.ballControl}</td>
+          <td>${escapeHtml(status)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  els.draftBoard.className = "draft-board";
+  els.draftBoard.innerHTML = `
+    <table>
+      <thead><tr><th>Face</th><th>Player</th><th>Pos</th><th>Score</th><th>Tecmo Traits</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderDraftNeeds() {
+  if (!els.draftTeamNeeds) return;
+  if (!draftState) {
+    els.draftTeamNeeds.className = "draft-needs empty";
+    els.draftTeamNeeds.textContent = "No active draft.";
+    return;
+  }
+  const teamIndex = currentDraftTeamIndex();
+  const roster = draftState.rosters[Math.max(0, teamIndex)] || draftState.rosters[0];
+  const counts = draftGroupCounts(roster);
+  const chips = DRAFT_GROUP_ORDER.map((group) => {
+    const target = DRAFT_GROUP_TARGETS[group] || 1;
+    const filled = counts[group]?.filled || 0;
+    const open = Math.max(0, target - filled);
+    return `<span class="need-pill ${open ? "" : "filled"}">${escapeHtml(DRAFT_GROUP_LABELS[group] || group)} ${filled}/${target}</span>`;
+  }).join("");
+  els.draftTeamNeeds.className = "draft-needs";
+  els.draftTeamNeeds.innerHTML = `
+    <div class="draft-pick-summary">
+      <strong>${escapeHtml(draftCurrentTeamName())}</strong>
+      <span>${draftState.complete ? "Draft complete" : `${draftPickLabel()} on the clock`}</span>
+    </div>
+    <div class="draft-needs">${chips}</div>
+  `;
+}
+
+function renderDraftHistory() {
+  if (!els.draftHistory) return;
+  if (!draftState?.picks?.length) {
+    els.draftHistory.className = "draft-history empty";
+    els.draftHistory.textContent = "No picks yet.";
+    return;
+  }
+  els.draftHistory.className = "draft-history";
+  els.draftHistory.innerHTML = draftState.picks
+    .slice()
+    .sort((a, b) => a.pickIndex - b.pickIndex)
+    .map((pick) => `
+      <div class="draft-history-row">
+        <span>R${pick.round} P${pick.pick}</span>
+        <strong>${escapeHtml(pick.teamName)}</strong>
+        <em>${escapeHtml(pick.playerName)} (${escapeHtml(pick.sourceRole)})</em>
+      </div>
+    `)
+    .join("");
+}
+
+function renderDraftTeamRosters() {
+  if (!els.draftTeamRosters) return;
+  if (!draftState?.picks?.length) {
+    els.draftTeamRosters.className = "draft-team-rosters empty";
+    els.draftTeamRosters.textContent = "No teams have drafted yet.";
+    return;
+  }
+  els.draftTeamRosters.className = "draft-team-rosters";
+  els.draftTeamRosters.innerHTML = draftState.rosters.map((roster, teamIndex) => {
+    const teamName = playerTable.teams[teamIndex]?.name || `Team ${teamIndex + 1}`;
+    const picks = roster
+      .map((player, teamSlot) => player ? `<span>${escapeHtml(TSB_POSITIONS_30[teamSlot])}: ${escapeHtml(player.name)}</span>` : "")
+      .filter(Boolean)
+      .join("");
+    return `<article><h4>${escapeHtml(teamName)}</h4><div>${picks || "<span>No picks yet</span>"}</div></article>`;
+  }).join("");
+}
+
 function renderDraftResults() {
   if (!els.draftResults) return;
+  renderDraftBoard();
+  renderDraftNeeds();
+  renderDraftHistory();
+  renderDraftTeamRosters();
   if (!draftState?.picks?.length) {
     els.draftResults.className = "draft-results empty";
     els.draftResults.textContent = supportedDraftLoaded()
@@ -1749,7 +2106,7 @@ function renderDraftResults() {
         <div class="draft-result-main">
           <strong>${escapeHtml(pick.teamName)}</strong>
           <span>#${escapeHtml(tsbNumberByteToJersey(pick.number))} ${escapeHtml(pick.playerName)}</span>
-          <small>${escapeHtml(pick.sourceTeam)} ${escapeHtml(pick.sourceRole)} -> ${escapeHtml(pick.targetRole)} · Rating ${pick.rating}</small>
+          <small>${escapeHtml(pick.sourceTeam)} ${escapeHtml(pick.sourceRole)} -> ${escapeHtml(pick.targetRole)} - Score ${pick.rating}</small>
         </div>
       </article>
     `)
@@ -1770,39 +2127,68 @@ function stopAutomaticDraft() {
   }
 }
 
-async function redraftRostersAutomatically() {
+function startDraftState(refreshSeed = false) {
   if (!supportedDraftLoaded()) return;
-  return withWork("Starting Draft", "Running automatic draft...", async () => {
-    const seed = currentDraftSeed(true);
-    draftUndoSnapshot = snapshotPendingRosterChanges();
-    draftState = createDraftState("automatic", seed);
-    if (!draftState) return;
-    draftState.started = true;
-    renderDraftResults();
-    updateRosterProgress(`Drafting rosters with seed ${seed}...`, 0, draftState.totalPicks);
-    while (!draftState.complete) {
+  if (draftUndoSnapshot) restorePendingRosterChanges(draftUndoSnapshot);
+  const seed = currentDraftSeed(refreshSeed);
+  draftUndoSnapshot = snapshotPendingRosterChanges();
+  draftState = createDraftState(els.draftMode.value, seed);
+  if (!draftState) return;
+  draftState.started = true;
+  updateRosterProgress(`Draft order created with seed ${seed}. ${draftPickLabel()} - ${draftCurrentTeamName()} is on the clock.`, 0, draftState.totalPicks);
+  renderDraftResults();
+  enableControls(Boolean(rom));
+}
+
+function stageDraftRoster() {
+  if (!draftState || !draftState.complete || draftState.staged) return 0;
+  let changed = 0;
+  draftState.rosters.forEach((roster, teamIndex) => {
+    const team = playerTable.teams[teamIndex];
+    roster.forEach((player, teamSlot) => {
+      if (!player) return;
+      const slotIndex = team.startSlot + teamSlot;
+      pendingNameEdits.set(slotIndex, player.name);
+      if (player.number !== null) pendingNumberEdits.set(slotIndex, player.number);
+      writePlayerAttributeValues(slotIndex, player.attributes);
+      writePlayerFace(slotIndex, player.faceId);
+      changed += 1;
+    });
+  });
+  draftState.staged = true;
+  renderPlayers();
+  return changed;
+}
+
+function stepDraftOnce() {
+  if (!supportedDraftLoaded()) return false;
+  if (!draftState || draftState.complete) startDraftState(!draftState);
+  if (!draftState || draftState.complete) return false;
+  autoDraftOnePick(false);
+  if (draftState.complete) {
+    const changed = stageDraftRoster();
+    finishRosterProgress(`Draft complete. Staged ${changed} roster slot(s). Review picks, then Finalize Draft.`);
+  } else {
+    updateRosterProgress(`${draftPickLabel()} - ${draftCurrentTeamName()} is on the clock. ${draftState.pickIndex} of ${draftState.totalPicks} picks complete.`, draftState.pickIndex, draftState.totalPicks);
+  }
+  renderDraftResults();
+  enableControls(Boolean(rom));
+  return true;
+}
+
+async function runDraft() {
+  if (!supportedDraftLoaded()) return;
+  return withWork("Running Draft", "Building Tecmo-style rosters...", async () => {
+    if (!draftState || draftState.complete) startDraftState(true);
+    while (draftState && !draftState.complete) {
       autoDraftOnePick(false);
-      updateRosterProgress(`Drafting rosters with seed ${seed}... ${draftState.pickIndex} of ${draftState.totalPicks} picks complete.`, draftState.pickIndex, draftState.totalPicks);
+      updateRosterProgress(`Drafting with seed ${draftState.seed}... ${draftState.pickIndex} of ${draftState.totalPicks} picks complete.`, draftState.pickIndex, draftState.totalPicks);
       updateWork(`Drafted ${draftState.pickIndex} of ${draftState.totalPicks} players...`, draftState.pickIndex, draftState.totalPicks);
       if (draftState.pickIndex % 30 === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
     }
-
-    let changed = 0;
-    draftState.rosters.forEach((roster, teamIndex) => {
-      const team = playerTable.teams[teamIndex];
-      roster.forEach((player, teamSlot) => {
-        if (!player) return;
-        const slotIndex = team.startSlot + teamSlot;
-        pendingNameEdits.set(slotIndex, player.name);
-        if (player.number !== null) pendingNumberEdits.set(slotIndex, player.number);
-        writePlayerAttributeValues(slotIndex, player.attributes);
-        writePlayerFace(slotIndex, player.faceId);
-        changed += 1;
-      });
-    });
+    const changed = stageDraftRoster();
     renderDraftResults();
-    renderPlayers();
-    finishRosterProgress(`Draft staged ${changed} roster slot(s) with seed ${seed}. Review the picks below, then Finalize Draft.`);
+    finishRosterProgress(`Draft complete. Staged ${changed} roster slot(s) with seed ${draftState.seed}. Review picks, then Finalize Draft.`);
     updateWork("Draft staged.", draftState.totalPicks, draftState.totalPicks);
     enableControls(Boolean(rom));
   }, playerTable.count);
@@ -1816,7 +2202,7 @@ function undoDraft() {
   stopAutomaticDraft();
   renderDraftResults();
   renderPlayers();
-  finishRosterProgress("Draft changes reverted. Previous staged roster edits were restored.");
+  finishRosterProgress("Draft reset. Previous staged roster edits were restored.");
   enableControls(Boolean(rom));
 }
 
@@ -3028,7 +3414,13 @@ els.randomDraftSeed.addEventListener("click", () => {
   draftSeedAutoGenerated = false;
   els.rosterStatus.textContent = `Draft seed set to ${els.draftSeed.value}.`;
 });
-els.redraftRosters.addEventListener("click", redraftRostersAutomatically);
+els.draftMode.addEventListener("change", () => {
+  if (draftState && !draftState.complete) {
+    els.rosterStatus.textContent = "Draft mode changed. Reset or run a new draft to use the new strategy.";
+  }
+});
+els.redraftRosters.addEventListener("click", runDraft);
+els.stepDraft.addEventListener("click", stepDraftOnce);
 els.revertDraft.addEventListener("click", undoDraft);
 els.finalizeDraft.addEventListener("click", () => withWork("Finalizing Draft", "Rebuilding roster data...", async () => {
   applyPendingRosterChanges();
