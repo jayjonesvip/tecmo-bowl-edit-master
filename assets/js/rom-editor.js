@@ -37,6 +37,8 @@ const els = {
   changelogOutput: document.querySelector("#changelog-output"),
   teamSelect: document.querySelector("#team-select"),
   redraftRosters: document.querySelector("#redraft-rosters"),
+  revertDraft: document.querySelector("#revert-draft"),
+  finalizeDraft: document.querySelector("#finalize-draft"),
   draftSeed: document.querySelector("#draft-seed"),
   randomDraftSeed: document.querySelector("#random-draft-seed"),
   identityTeamSelect: document.querySelector("#identity-team-select"),
@@ -91,6 +93,7 @@ let pendingTeamEdits = new Map();
 let pendingTeamAiEdits = new Map();
 let pendingColorEdits = new Map();
 let draftState = null;
+let draftUndoSnapshot = null;
 let automaticDraftTimer = null;
 
 const NES_COLORS = [
@@ -434,6 +437,7 @@ function setLoadedRom(bytes, name) {
   els.rosterProgress.value = 0;
   selectedPlayerSlot = 0;
   draftState = null;
+  draftUndoSnapshot = null;
   stopAutomaticDraft();
 
   fillSelects();
@@ -467,6 +471,8 @@ function enableControls(enabled) {
   els.applyColorChanges.disabled = !enabled || !pendingColorEdits.size;
   els.applyPlayerNames.disabled = !enabled || !hasPendingRosterChanges();
   els.redraftRosters.disabled = !enabled || !supportedDraftLoaded();
+  els.revertDraft.disabled = !enabled || !draftUndoSnapshot;
+  els.finalizeDraft.disabled = !enabled || !hasPendingRosterChanges();
   els.randomDraftSeed.disabled = !enabled || !supportedDraftLoaded();
   els.downloadChangelog.disabled = !enabled || !els.changelogOutput.value.trim();
 }
@@ -1705,6 +1711,7 @@ async function redraftRostersAutomatically() {
   if (!supportedDraftLoaded()) return;
   return withWork("Re-Drafting Rosters", "Running automatic draft...", async () => {
     const seed = currentDraftSeed();
+    draftUndoSnapshot = snapshotPendingRosterChanges();
     draftState = createDraftState("automatic", seed);
     if (!draftState) return;
     draftState.started = true;
@@ -1729,9 +1736,21 @@ async function redraftRostersAutomatically() {
       });
     });
     renderPlayers();
-    finishRosterProgress(`Re-draft staged ${changed} roster slot(s) with seed ${seed}. Review the roster, then Finalize Roster.`);
+    finishRosterProgress(`Re-draft staged ${changed} roster slot(s) with seed ${seed}. Review the roster, then Finalize Draft.`);
     updateWork("Re-draft staged.", draftState.totalPicks, draftState.totalPicks);
+    enableControls(Boolean(rom));
   }, playerTable.count);
+}
+
+function undoDraft() {
+  if (!draftUndoSnapshot) return;
+  restorePendingRosterChanges(draftUndoSnapshot);
+  draftUndoSnapshot = null;
+  draftState = null;
+  stopAutomaticDraft();
+  renderPlayers();
+  finishRosterProgress("Draft changes reverted. Previous staged roster edits were restored.");
+  enableControls(Boolean(rom));
 }
 
 function swapTsbPlayerSlots(sourceSlot, targetTeamSlot) {
@@ -1767,7 +1786,7 @@ function swapTsbPlayerSlots(sourceSlot, targetTeamSlot) {
   selectedPlayerSlot = targetSlot;
   const sourceRole = slotRoleForTeamSlot(sourceSlot - team.startSlot).label;
   const targetRole = slotRoleForTeamSlot(targetTeamSlot).label;
-  els.rosterStatus.textContent = `Swapped ${sourceName} (${sourceRole}) with ${targetName} (${targetRole}). Apply All Changes to commit the roster records.`;
+  els.rosterStatus.textContent = `Swapped ${sourceName} (${sourceRole}) with ${targetName} (${targetRole}). Apply Changes to commit the roster records.`;
   renderPlayers();
 }
 
@@ -1968,6 +1987,23 @@ function clearPendingRosterChanges() {
   pendingPlayerFaces.clear();
 }
 
+function snapshotPendingRosterChanges() {
+  return {
+    names: new Map(pendingNameEdits),
+    numbers: new Map(pendingNumberEdits),
+    attributes: new Map(Array.from(pendingPlayerAttributes.entries(), ([slot, values]) => [slot, values.slice()])),
+    faces: new Map(pendingPlayerFaces),
+  };
+}
+
+function restorePendingRosterChanges(snapshot) {
+  if (!snapshot) return;
+  pendingNameEdits = new Map(snapshot.names);
+  pendingNumberEdits = new Map(snapshot.numbers);
+  pendingPlayerAttributes = new Map(Array.from(snapshot.attributes.entries(), ([slot, values]) => [slot, values.slice()]));
+  pendingPlayerFaces = new Map(snapshot.faces);
+}
+
 function renderPlayerDiff() {
   const sets = [...pendingNameSets(), ...pendingPlayerAttributeSets()];
   if (!sets.length) {
@@ -1976,7 +2012,7 @@ function renderPlayerDiff() {
     return;
   }
   const formatNote = playerTable.format === "tsb-pointer"
-    ? "Roster names, jersey numbers, attributes, and faces stay staged until Finalize Roster. Names are compact variable-length records, so finalizing name changes rebuilds the roster block and updates every player pointer."
+    ? "Roster names, jersey numbers, attributes, and faces stay staged until Apply Changes or Finalize Draft. Names are compact variable-length records, so applying name changes rebuilds the roster block and updates every player pointer."
     : "Names are stored as fixed 16-byte uppercase slots. Periods are encoded as [ in this ROM.";
   els.playerDiff.innerHTML = `
     <h3>${sets.length} pending roster change${sets.length === 1 ? "" : "s"}</h3>
@@ -2006,6 +2042,7 @@ function applyPlayerNameEdits() {
       updateDirty();
     }
     clearPendingRosterChanges();
+    draftUndoSnapshot = null;
     renderPlayers();
     els.rosterStatus.textContent = `Applied ${written} roster byte(s).`;
   } catch (error) {
@@ -2744,7 +2781,7 @@ async function exportRom() {
       }
     }
     if (hasPendingRosterChanges()) {
-      els.rosterStatus.textContent = "Roster changes are still staged. Click Finalize Roster before exporting if you want names, jerseys, attributes, or faces included.";
+      els.rosterStatus.textContent = "Roster changes are still staged. Click Apply Changes or Finalize Draft before exporting if you want names, jerseys, attributes, or faces included.";
     }
     updateWork("Creating ROM download...", 2, 3);
     const blob = new Blob([rom], { type: "application/octet-stream" });
@@ -2921,6 +2958,13 @@ els.randomDraftSeed.addEventListener("click", () => {
   els.rosterStatus.textContent = `Draft seed set to ${els.draftSeed.value}.`;
 });
 els.redraftRosters.addEventListener("click", redraftRostersAutomatically);
+els.revertDraft.addEventListener("click", undoDraft);
+els.finalizeDraft.addEventListener("click", () => withWork("Finalizing Draft", "Rebuilding roster data...", async () => {
+  applyPendingRosterChanges();
+  draftUndoSnapshot = null;
+  updateWork("Draft finalized.", 1, 1);
+  enableControls(Boolean(rom));
+}, 1));
 els.identityTeamSelect.addEventListener("change", renderTeams);
 els.teamIdentityEditor.addEventListener("input", (event) => {
   const input = event.target.closest("[data-team-string-index]");
@@ -3072,9 +3116,9 @@ els.attributeEditor.addEventListener("change", (event) => {
     renderPlayerAttributes();
   }
 });
-els.applyPlayerNames.addEventListener("click", () => withWork("Finalizing Roster", "Rebuilding roster data...", async () => {
+els.applyPlayerNames.addEventListener("click", () => withWork("Applying Roster Changes", "Rebuilding roster data...", async () => {
   applyPlayerNameEdits();
-  updateWork("Roster finalized.", 1, 1);
+  updateWork("Roster changes applied.", 1, 1);
 }, 1));
 renderPalette();
 renderHackCategories();

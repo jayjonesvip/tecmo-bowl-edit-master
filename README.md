@@ -34,9 +34,9 @@ Then open `http://localhost:8080/`.
 
 1. Open a legally obtained supported 28-team NES football `.nes` ROM.
 2. Use **Teams** to review team names, CPU run/pass preference, simulation strength, and playbooks.
-3. Use **Players > Roster Management** to run an automatic re-draft from the loaded ROM's current roster pool.
-4. Review the staged roster changes in the player table and red/green diff.
-5. Click **Finalize Roster** to rebuild the compact roster records.
+3. Use **Draft Room** to run an automatic re-draft from the loaded ROM's current roster pool.
+4. Review the staged roster changes in **Players** using the player table and red/green diff.
+5. Click **Finalize Draft** in Draft Room, or **Apply Changes** in Players, to rebuild the compact roster records.
 6. Export the edited ROM.
 
 Roster management actions intentionally stage changes first. This makes the dirty byte preview visible before the roster block is rebuilt.

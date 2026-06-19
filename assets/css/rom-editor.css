@@ -349,7 +349,7 @@ input[type="range"] {
   align-items: start;
 }
 
-.roster-management {
+.draft-room {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -361,7 +361,7 @@ input[type="range"] {
   background: var(--panel);
 }
 
-.roster-management h2 {
+.draft-room h2 {
   margin: 0 0 4px;
   font-size: 13px;
   text-transform: uppercase;
@@ -369,7 +369,7 @@ input[type="range"] {
   color: var(--muted);
 }
 
-.roster-management progress {
+.draft-room progress {
   width: min(520px, 100%);
   height: 10px;
   margin-top: 8px;
@@ -1116,7 +1116,7 @@ tr:last-child td {
   }
 
   .human-grid,
-  .roster-management,
+  .draft-room,
   .hack-card {
     grid-template-columns: 1fr;
   }
